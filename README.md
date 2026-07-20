@@ -10,62 +10,81 @@
 - `bot.py` — نقطه ورود و هندلرهای تلگرام
 - `translator.py` — منطق ترجمه (مستقل از لایه‌ی تلگرام)
 - `requirements.txt` — وابستگی‌ها
+- `Dockerfile` — تعریف ایمیج Docker
+- `docker-compose.yml` — اجرای راحت‌تر با Docker Compose
+- `.dockerignore`
 - `.env.example` — نمونه‌ی متغیرهای محیطی
 - `.gitignore`
 
 ## پیش‌نیازها
 
-- Python 3.10 یا بالاتر
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) نصب‌شده روی ویندوز
 - یک توکن بات تلگرام از [@BotFather](https://t.me/BotFather)
 
 هیچ کلید API یا اکانت اضافه‌ای لازم نیست.
 
-## نصب و اجرا روی ویندوز
+## نصب و اجرا روی ویندوز با Docker
 
-۱. مخزن رو کلون کنید و وارد پوشه‌ی پروژه بشید (در PowerShell یا CMD):
+۱. مطمئن شوید Docker Desktop نصب و در حال اجراست (آیکون نهنگ توی system tray).
+
+۲. مخزن رو کلون کنید و وارد پوشه‌ی پروژه بشید (در PowerShell یا CMD):
 
 ```powershell
 git clone <repository-url>
 cd telegram-bot
 ```
 
-۲. یک محیط مجازی بسازید و فعالش کنید:
-
-```powershell
-python -m venv venv
-venv\Scripts\activate
-```
-
-۳. وابستگی‌ها رو نصب کنید:
-
-```powershell
-pip install -r requirements.txt
-```
-
-۴. فایل `.env.example` رو کپی کنید و به `.env` تغییر نام بدید:
+۳. فایل `.env.example` رو کپی کنید و به `.env` تغییر نام بدید:
 
 ```powershell
 copy .env.example .env
 ```
 
-۵. فایل `.env` رو با یک ویرایشگر متن باز کنید و توکن واقعی بات رو جایگزین کنید:
+۴. فایل `.env` رو با یک ویرایشگر متن باز کنید و توکن واقعی بات رو جایگزین کنید:
 
 ```
 TELEGRAM_BOT_TOKEN=توکن_بات_تلگرام_شما
 ```
 
-۶. بات رو اجرا کنید:
+۵. ایمیج رو بسازید و کانتینر رو اجرا کنید:
 
 ```powershell
-python bot.py
+docker compose up --build
 ```
 
-اگر همه‌چیز درست باشه، پیام `Bot started` توی خروجی نمایش داده می‌شه و بات آماده‌ی
-دریافت پیامه. حالا می‌تونید توی تلگرام برید سراغ بات خودتون و باهاش چت کنید.
+اگر همه‌چیز درست باشه، پیام `Bot started` توی خروجی ترمینال نمایش داده می‌شه و بات
+آماده‌ی دریافت پیامه. حالا می‌تونید توی تلگرام برید سراغ بات خودتون و باهاش چت کنید.
+
+### اجرا در پس‌زمینه (detached)
+
+اگه نمی‌خوای ترمینال باز بمونه:
+
+```powershell
+docker compose up --build -d
+```
+
+برای دیدن لاگ‌ها:
+
+```powershell
+docker compose logs -f
+```
 
 ### توقف بات
 
-برای متوقف کردن بات، در ترمینال کلیدهای `Ctrl + C` رو بزنید.
+```powershell
+docker compose down
+```
+
+اگه با `docker compose up` (بدون `-d`) اجرا کردی، کافیه توی همون ترمینال `Ctrl + C`
+بزنی.
+
+### بعد از تغییر کد
+
+اگه کد رو تغییر دادی (مثلاً `bot.py` یا `translator.py`)، باید ایمیج رو دوباره بسازی:
+
+```powershell
+docker compose up --build
+```
 
 ## دستورات بات
 
