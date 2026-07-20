@@ -88,8 +88,8 @@ def main() -> None:
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not telegram_token:
         raise SystemExit("TELEGRAM_BOT_TOKEN environment variable is not set")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise SystemExit("ANTHROPIC_API_KEY environment variable is not set")
+    if not os.environ.get("GEMINI_API_KEY"):
+        raise SystemExit("GEMINI_API_KEY environment variable is not set")
 
     app = ApplicationBuilder().token(telegram_token).build()
     app.add_handler(CommandHandler("start", start))

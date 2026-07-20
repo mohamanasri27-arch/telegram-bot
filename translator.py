@@ -1,14 +1,15 @@
-"""Translation logic using the Claude API, kept independent of the Telegram layer."""
+"""Translation logic using the Google Gemini API, kept independent of the Telegram layer."""
 import asyncio
 import logging
 import os
 import re
 
-from anthropic import Anthropic, APIStatusError, RateLimitError
+import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted, GoogleAPICallError
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-sonnet-5"
+MODEL = "gemini-2.0-flash"
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2  # seconds
 
@@ -40,7 +41,8 @@ class TranslationError(Exception):
 
 class Translator:
     def __init__(self, api_key: str | None = None) -> None:
-        self._client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
+        genai.configure(api_key=api_key or os.environ.get("GEMINI_API_KEY"))
+        self._model = genai.GenerativeModel(MODEL, system_instruction=SYSTEM_PROMPT)
 
     async def translate(self, text: str) -> str:
         target_lang = "انگلیسی" if is_persian(text) else "فارسی"
@@ -49,22 +51,16 @@ class Translator:
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 response = await asyncio.to_thread(
-                    self._client.messages.create,
-                    model=MODEL,
-                    max_tokens=4096,
-                    system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": user_message}],
+                    self._model.generate_content, user_message
                 )
-                return "".join(
-                    block.text for block in response.content if block.type == "text"
-                ).strip()
-            except RateLimitError:
-                logger.warning("Rate limited by Claude API (attempt %d/%d)", attempt, MAX_RETRIES)
+                return (response.text or "").strip()
+            except ResourceExhausted:
+                logger.warning("Rate limited by Gemini API (attempt %d/%d)", attempt, MAX_RETRIES)
                 if attempt == MAX_RETRIES:
                     raise TranslationError("rate_limited") from None
                 await asyncio.sleep(RETRY_BASE_DELAY * attempt)
-            except APIStatusError:
-                logger.exception("Claude API error (attempt %d/%d)", attempt, MAX_RETRIES)
+            except GoogleAPICallError:
+                logger.exception("Gemini API error (attempt %d/%d)", attempt, MAX_RETRIES)
                 if attempt == MAX_RETRIES:
                     raise TranslationError("api_error") from None
                 await asyncio.sleep(RETRY_BASE_DELAY * attempt)
