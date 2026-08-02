@@ -12,6 +12,7 @@ import os
 
 from faster_whisper import WhisperModel
 
+import persian_text
 import vocabulary
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,8 @@ class Transcriber:
                 # drag the rest into a repetition loop.
                 condition_on_previous_text=False,
             )
-            return " ".join(segment.text.strip() for segment in segments).strip()
+            raw = " ".join(segment.text.strip() for segment in segments)
+            return persian_text.normalize(raw)
         except Exception as exc:
             logger.exception("Transcription failed for %s", audio_path)
             raise TranscriptionError("transcription_failed") from exc

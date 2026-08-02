@@ -13,6 +13,7 @@ import re
 
 from deep_translator import GoogleTranslator
 
+import persian_text
 import vocabulary
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,10 @@ class Translator:
 
     async def translate(self, text: str) -> str:
         target = "en" if is_persian(text) else "fa"
+        if target == "en":
+            # Glossary keys are written in Persian orthography, so a term typed
+            # with Arabic letters would silently fail to match without this.
+            text = persian_text.normalize(text)
         shielded, replacements = self._shield(text)
 
         translated = None
