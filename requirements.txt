@@ -1,4 +1,4 @@
-python-telegram-bot==21.6
+python-telegram-bot==22.8
 deep-translator==1.11.4
 python-dotenv==1.0.1
-faster-whisper==1.0.3
+faster-whisper==1.2.1

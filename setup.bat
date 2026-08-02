@@ -23,7 +23,13 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 if errorlevel 1 (
     echo.
-    echo ERROR: Could not install dependencies. Check your internet connection.
+    echo ERROR: Could not install dependencies.
+    echo.
+    echo If the error mentions "Microsoft Visual C++ 14.0 is required", your
+    echo Python version is newer than some packages support. Installing
+    echo Python 3.12 from python.org and running this setup again will fix it.
+    echo.
+    echo Otherwise, check your internet connection and try again.
     pause
     exit /b 1
 )
