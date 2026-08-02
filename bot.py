@@ -29,7 +29,9 @@ TELEGRAM_MAX_LENGTH = 4000
 # Telegram's defaults are ~5s, which is not enough to pull a voice file over a
 # slow or filtered connection. These are deliberately generous.
 NETWORK_TIMEOUT = 60.0
-MEDIA_TIMEOUT = 180.0
+MEDIA_TIMEOUT = 300.0
+
+MAX_VOICE_DURATION_SECONDS = 180  # 3 minutes
 
 START_MESSAGE = (
     "سلام! 👋\n\n"
@@ -61,6 +63,10 @@ ERROR_MESSAGE = "متأسفم، در ترجمه‌ی پیام مشکلی پیش 
 VOICE_ERROR_MESSAGE = "متأسفم، نتونستم ویس رو پردازش کنم. لطفاً دوباره امتحان کنید."
 TOO_LONG_MESSAGE = "پیام شما طولانی‌تر از حد مجاز (۴۰۰۰ کاراکتر) هست. لطفاً متن کوتاه‌تری بفرستید."
 VOICE_PROCESSING_MESSAGE = "🎧 در حال گوش دادن به ویس شما..."
+VOICE_TOO_LONG_MESSAGE = (
+    "این ویس {duration} ثانیه‌ست و از حد مجاز (۳ دقیقه) بیشتره. "
+    "لطفاً به چند ویس کوتاه‌تر تقسیمش کنید."
+)
 VOICE_TIMEOUT_MESSAGE = (
     "دانلود ویس از سرور تلگرام خیلی طول کشید. لطفاً اینترنت‌تون رو چک کنید و "
     "دوباره بفرستید. اگر ویس طولانی بود، کوتاه‌ترش کنید."
@@ -116,6 +122,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not voice:
         return
 
+    duration = voice.duration or 0
+    if duration > MAX_VOICE_DURATION_SECONDS:
+        await update.message.reply_text(VOICE_TOO_LONG_MESSAGE.format(duration=duration))
+        return
+
     status_message = await update.message.reply_text(VOICE_PROCESSING_MESSAGE)
 
     audio_path = None
@@ -131,6 +142,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             audio_path,
             read_timeout=MEDIA_TIMEOUT,
             connect_timeout=NETWORK_TIMEOUT,
+        )
+
+        await status_message.edit_text(
+            f"✍️ در حال تبدیل {duration} ثانیه صدا به متن... (کمی طول می‌کشه)"
         )
 
         transcript = await transcriber.transcribe(audio_path)

@@ -1,5 +1,6 @@
 @echo off
 cd /d "%~dp0"
+title Telegram Translator Bot
 
 if not exist venv (
     echo ERROR: Setup has not been run yet.
@@ -16,15 +17,21 @@ if not exist .env (
 )
 
 echo ============================================
-echo   Starting the bot...
+echo   Telegram Translator Bot
 echo   Keep this window open while using the bot.
-echo   Press Ctrl+C to stop.
+echo   Press Ctrl+C twice to stop it for good.
 echo ============================================
 echo.
 
 call venv\Scripts\activate.bat
+
+:restart
 python bot.py
 
 echo.
-echo The bot has stopped.
-pause
+echo ============================================
+echo   The bot stopped. Restarting in 10 seconds...
+echo   Close this window now if you want it to stay stopped.
+echo ============================================
+timeout /t 10 /nobreak >nul
+goto restart
