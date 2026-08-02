@@ -10,6 +10,7 @@ import tempfile
 
 from dotenv import load_dotenv
 from telegram import Update
+from telegram.error import TimedOut
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from transcriber import Transcriber, TranscriptionError
@@ -24,6 +25,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TELEGRAM_MAX_LENGTH = 4000
+
+# Telegram's defaults are ~5s, which is not enough to pull a voice file over a
+# slow or filtered connection. These are deliberately generous.
+NETWORK_TIMEOUT = 60.0
+MEDIA_TIMEOUT = 180.0
 
 START_MESSAGE = (
     "سلام! 👋\n\n"
@@ -55,6 +61,10 @@ ERROR_MESSAGE = "متأسفم، در ترجمه‌ی پیام مشکلی پیش 
 VOICE_ERROR_MESSAGE = "متأسفم، نتونستم ویس رو پردازش کنم. لطفاً دوباره امتحان کنید."
 TOO_LONG_MESSAGE = "پیام شما طولانی‌تر از حد مجاز (۴۰۰۰ کاراکتر) هست. لطفاً متن کوتاه‌تری بفرستید."
 VOICE_PROCESSING_MESSAGE = "🎧 در حال گوش دادن به ویس شما..."
+VOICE_TIMEOUT_MESSAGE = (
+    "دانلود ویس از سرور تلگرام خیلی طول کشید. لطفاً اینترنت‌تون رو چک کنید و "
+    "دوباره بفرستید. اگر ویس طولانی بود، کوتاه‌ترش کنید."
+)
 EMPTY_TRANSCRIPT_MESSAGE = "چیزی توی ویس تشخیص ندادم. لطفاً واضح‌تر صحبت کنید و دوباره بفرستید."
 
 translator = Translator()
@@ -113,8 +123,15 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as temp_file:
             audio_path = temp_file.name
 
-        telegram_file = await voice.get_file()
-        await telegram_file.download_to_drive(audio_path)
+        telegram_file = await voice.get_file(
+            read_timeout=MEDIA_TIMEOUT,
+            connect_timeout=NETWORK_TIMEOUT,
+        )
+        await telegram_file.download_to_drive(
+            audio_path,
+            read_timeout=MEDIA_TIMEOUT,
+            connect_timeout=NETWORK_TIMEOUT,
+        )
 
         transcript = await transcriber.transcribe(audio_path)
 
@@ -134,6 +151,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except (TranscriptionError, TranslationError):
         await status_message.edit_text(VOICE_ERROR_MESSAGE)
+    except TimedOut:
+        logger.warning("Timed out downloading the voice file from Telegram")
+        await status_message.edit_text(VOICE_TIMEOUT_MESSAGE)
     except Exception:
         logger.exception("Unhandled error while handling voice message")
         await status_message.edit_text(VOICE_ERROR_MESSAGE)
@@ -142,12 +162,31 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             os.remove(audio_path)
 
 
+async def _preload_model(application) -> None:
+    """Warm the Whisper model at startup so the first voice message isn't slow."""
+    logger.info("Preparing the speech model, please wait...")
+    try:
+        await transcriber.load()
+    except Exception:
+        logger.exception("Could not preload the speech model; will retry on first voice message")
+
+
 def main() -> None:
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not telegram_token:
         raise SystemExit("TELEGRAM_BOT_TOKEN environment variable is not set")
 
-    app = ApplicationBuilder().token(telegram_token).build()
+    app = (
+        ApplicationBuilder()
+        .token(telegram_token)
+        .connect_timeout(NETWORK_TIMEOUT)
+        .read_timeout(NETWORK_TIMEOUT)
+        .write_timeout(NETWORK_TIMEOUT)
+        .media_write_timeout(MEDIA_TIMEOUT)
+        .pool_timeout(NETWORK_TIMEOUT)
+        .post_init(_preload_model)
+        .build()
+    )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
