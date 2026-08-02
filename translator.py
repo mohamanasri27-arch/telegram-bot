@@ -52,6 +52,10 @@ class Translator:
     def __init__(self) -> None:
         self._glossary = vocabulary.load_glossary()
 
+    def reload_glossary(self) -> None:
+        """Pick up terms added since startup without restarting the bot."""
+        self._glossary = vocabulary.load_glossary()
+
     def _shield(self, text: str) -> tuple[str, list[str]]:
         """Swap code and glossary terms for placeholders before translating."""
         replacements: list[str] = []

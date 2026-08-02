@@ -2,3 +2,7 @@
 __pycache__/
 *.pyc
 venv/
+
+# Written at runtime; must survive bot updates.
+settings.json
+my_terms.txt

@@ -39,6 +39,39 @@ MISSING_SPACE_AFTER_PUNCT_RE = re.compile(r"([.،؛:؟!])(?=[^\s\d])")
 STRAY_ZWNJ_RE = re.compile(rf"{ZWNJ}{{2,}}|(?<=\s){ZWNJ}|{ZWNJ}(?=\s)")
 
 
+# Words that carry no meaning when they stand alone at a clause boundary.
+# Deliberately conservative: words like «حالا» and «دیگه» are excluded because
+# they often do carry meaning, and stripping them would change the sentence.
+FILLERS = [
+    "خب", "خُب", "خب که", "یعنی", "اومم", "اوم", "امم", "ام",
+    "اِ", "اه", "آآ", "اا", "ااا", "ببین", "ببینید",
+    "راستش", "راستشو بخوای", "والا", "خلاصه که",
+    "چیز", "چیزه", "این که", "اینکه چی",
+]
+
+# Only strip a filler when it opens the text or follows sentence punctuation,
+# and only when a real word follows it.
+_FILLER_ALTERNATION = "|".join(sorted((re.escape(f) for f in FILLERS), key=len, reverse=True))
+FILLER_RE = re.compile(
+    rf"(^|(?<=[.،؛:؟!])\s*)({_FILLER_ALTERNATION})(\s*[،,]?\s+)(?=\S)",
+    re.UNICODE,
+)
+
+
+def remove_fillers(text: str) -> str:
+    """Drop spoken hesitation words that add nothing to the written sentence."""
+    if not text:
+        return text
+
+    previous = None
+    # One filler can hide another ("خب یعنی ..."), so repeat until stable.
+    while previous != text:
+        previous = text
+        text = FILLER_RE.sub(r"\1", text)
+
+    return MULTISPACE_RE.sub(" ", text).strip()
+
+
 def normalize(text: str) -> str:
     """Return the same sentence with Persian orthography and tidy spacing."""
     if not text:

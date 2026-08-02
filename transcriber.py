@@ -13,6 +13,7 @@ import os
 from faster_whisper import WhisperModel
 
 import persian_text
+import settings
 import vocabulary
 
 logger = logging.getLogger(__name__)
@@ -35,10 +36,32 @@ class TranscriptionError(Exception):
 
 class Transcriber:
     def __init__(self, model_size: str | None = None) -> None:
-        self._model_size = model_size or os.environ.get("WHISPER_MODEL", DEFAULT_MODEL_SIZE)
+        self._model_size = (
+            model_size
+            or os.environ.get("WHISPER_MODEL")
+            or settings.get("model")
+            or DEFAULT_MODEL_SIZE
+        )
         self._model: WhisperModel | None = None
         self._load_lock = asyncio.Lock()
         self._hotwords: str | None = None
+
+    @property
+    def model_size(self) -> str:
+        return self._model_size
+
+    async def switch_model(self, model_size: str) -> None:
+        """Drop the current model and load a different one."""
+        if model_size == self._model_size and self._model is not None:
+            return
+        async with self._load_lock:
+            self._model = None
+            self._model_size = model_size
+        await self.load()
+
+    def reload_hotwords(self) -> None:
+        """Pick up terms added since startup without restarting the bot."""
+        self._hotwords = vocabulary.load_hotwords()
 
     async def load(self) -> None:
         """Load the model, downloading it on first ever run."""
@@ -83,7 +106,10 @@ class Transcriber:
                 condition_on_previous_text=False,
             )
             raw = " ".join(segment.text.strip() for segment in segments)
-            return persian_text.normalize(raw)
+            cleaned = persian_text.normalize(raw)
+            if settings.get("clean_fillers"):
+                cleaned = persian_text.remove_fillers(cleaned)
+            return cleaned
         except Exception as exc:
             logger.exception("Transcription failed for %s", audio_path)
             raise TranscriptionError("transcription_failed") from exc
