@@ -1,0 +1,307 @@
+# واژه‌نامه‌ی عمومی فارسی → انگلیسی
+#
+# این فایل فقط روی «ترجمه» اثر می‌گذارد و هیچ محدودیت اندازه‌ای ندارد،
+# پس هر تعداد اصطلاح که خواستید اینجا اضافه کنید.
+#
+# قالب هر خط:   کلمه فارسی = English Term
+# خطوطی که با # شروع شوند نادیده گرفته می‌شوند.
+#
+# نکته: اصطلاحات شخصی/شرکتی خودتان را در vocabulary.txt بنویسید، نه اینجا.
+
+# ============================================================
+#  هوش مصنوعی و کار با مدل‌های زبانی
+# ============================================================
+هوش مصنوعی = AI
+مدل زبانی = language model
+مدل زبانی بزرگ = large language model
+پرامپت = prompt
+پرامپت نویسی = prompt engineering
+دستور = instruction
+ورودی = input
+خروجی = output
+پاسخ = response
+توکن = token
+زمینه = context
+پنجره زمینه = context window
+حافظه = memory
+مکالمه = conversation
+گفتگو = chat
+دستیار = assistant
+عامل = agent
+ابزار = tool
+فراخوانی ابزار = tool call
+تنظیم دقیق = fine-tuning
+آموزش مدل = model training
+داده آموزشی = training data
+دیتاست = dataset
+مجموعه داده = dataset
+یادگیری ماشین = machine learning
+یادگیری عمیق = deep learning
+شبکه عصبی = neural network
+الگوریتم = algorithm
+دقت مدل = model accuracy
+توهم = hallucination
+دما = temperature
+نسخه مدل = model version
+تولید متن = text generation
+تولید تصویر = image generation
+تشخیص گفتار = speech recognition
+تبدیل متن به گفتار = text-to-speech
+بینایی ماشین = computer vision
+پردازش زبان طبیعی = natural language processing
+جستجوی معنایی = semantic search
+پایگاه دانش = knowledge base
+
+# ============================================================
+#  برنامه‌نویسی و توسعه نرم‌افزار
+# ============================================================
+کد = code
+کدنویسی = coding
+برنامه نویسی = programming
+برنامه نویس = developer
+توسعه دهنده = developer
+تابع = function
+متغیر = variable
+کلاس = class
+شیء = object
+متد = method
+پارامتر = parameter
+آرگومان = argument
+مقدار = value
+نوع داده = data type
+رشته = string
+عدد صحیح = integer
+آرایه = array
+لیست = list
+حلقه = loop
+شرط = condition
+کتابخانه = library
+فریمورک = framework
+پکیج = package
+ماژول = module
+وابستگی = dependency
+مخزن = repository
+شاخه = branch
+کامیت = commit
+ادغام = merge
+نسخه = version
+کنترل نسخه = version control
+باگ = bug
+خطا = error
+اشکال زدایی = debugging
+رفع اشکال = bug fix
+تست = test
+تست واحد = unit test
+اجرا = run
+کامپایل = compile
+استقرار = deployment
+دیپلوی = deploy
+محیط توسعه = development environment
+محیط عملیاتی = production environment
+سورس کد = source code
+مستندات = documentation
+بازنویسی کد = refactoring
+بهینه سازی = optimization
+کارایی = performance
+مقیاس پذیری = scalability
+معماری = architecture
+الگوی طراحی = design pattern
+
+# ============================================================
+#  وب، سرور و دیتابیس
+# ============================================================
+وب سایت = website
+سایت = website
+صفحه وب = web page
+مرورگر = browser
+سرور = server
+میزبانی = hosting
+دامنه = domain
+لینک = link
+آدرس = URL
+درخواست = request
+پاسخ سرور = server response
+رابط برنامه نویسی = API
+نقطه پایانی = endpoint
+احراز هویت = authentication
+مجوز دسترسی = authorization
+کلید دسترسی = API key
+رمزنگاری = encryption
+پایگاه داده = database
+دیتابیس = database
+جدول = table
+رکورد = record
+ستون = column
+سطر = row
+کوئری = query
+پرس و جو = query
+نمایه = index
+پشتیبان گیری = backup
+بازیابی = restore
+کش = cache
+صف = queue
+بار سرور = server load
+پهنای باند = bandwidth
+فایروال = firewall
+شبکه = network
+پروتکل = protocol
+ابر = cloud
+رایانش ابری = cloud computing
+کانتینر = container
+میکروسرویس = microservice
+
+# ============================================================
+#  رابط کاربری و طراحی
+# ============================================================
+رابط کاربری = user interface
+تجربه کاربری = user experience
+طراحی = design
+قالب = template
+پوسته = theme
+دکمه = button
+فرم = form
+منو = menu
+نوار ابزار = toolbar
+پنل = panel
+داشبورد = dashboard
+نمودار = chart
+جدول داده = data table
+اعلان = notification
+پیام خطا = error message
+واکنش گرا = responsive
+حالت تاریک = dark mode
+دسترس پذیری = accessibility
+
+# ============================================================
+#  کسب‌وکار، مالی و اداری
+# ============================================================
+شرکت = company
+سازمان = organization
+کسب و کار = business
+مدیر = manager
+مدیرعامل = CEO
+کارمند = employee
+کارشناس = specialist
+همکار = colleague
+تیم = team
+دپارتمان = department
+واحد = unit
+جلسه = meeting
+گزارش = report
+پروژه = project
+وظیفه = task
+مهلت = deadline
+برنامه زمانی = schedule
+اولویت = priority
+پیشرفت = progress
+بازخورد = feedback
+تصمیم گیری = decision making
+راهکار = solution
+راهبرد = strategy
+هدف = goal
+شاخص عملکرد = KPI
+مشتری = customer
+ارباب رجوع = client
+قرارداد = contract
+فاکتور = invoice
+پیش فاکتور = proforma invoice
+صورتحساب = bill
+پرداخت = payment
+هزینه = cost
+درآمد = revenue
+سود = profit
+زیان = loss
+بودجه = budget
+سرمایه = capital
+سرمایه گذاری = investment
+حسابداری = accounting
+مالیات = tax
+بیمه = insurance
+وام = loan
+تسهیلات = credit facilities
+اعتبار = credit
+اعتبارسنجی = credit assessment
+اقساط = installments
+قسط = installment
+سررسید = due date
+بازپرداخت = repayment
+ضامن = guarantor
+وثیقه = collateral
+چک = cheque
+سفته = promissory note
+تخفیف = discount
+قیمت = price
+تعرفه = tariff
+انبار = warehouse
+موجودی = inventory
+سفارش = order
+تحویل = delivery
+ارسال = shipping
+مرجوعی = return
+گارانتی = warranty
+پشتیبانی = support
+خدمات پس از فروش = after-sales service
+بازاریابی = marketing
+تبلیغات = advertising
+فروش = sales
+بازار هدف = target market
+رقیب = competitor
+سهم بازار = market share
+برند = brand
+
+# ============================================================
+#  اسناد و مکاتبات
+# ============================================================
+پرونده = case file
+سند = document
+مدرک = document
+فرم درخواست = application form
+درخواست کننده = applicant
+امضا = signature
+مهر = stamp
+تاییدیه = confirmation
+رونوشت = copy
+پیوست = attachment
+بایگانی = archive
+شماره پیگیری = tracking number
+تاریخ = date
+مهلت اعتبار = validity period
+شرایط = terms
+مقررات = regulations
+قانون = law
+آیین نامه = bylaw
+مصوبه = resolution
+بخشنامه = circular
+
+# ============================================================
+#  عبارت‌های رایج در توضیح دادن کار
+# ============================================================
+به طور خلاصه = in short
+به عبارت دیگر = in other words
+برای مثال = for example
+در نتیجه = as a result
+بنابراین = therefore
+علاوه بر این = in addition
+با این حال = however
+در حال حاضر = currently
+به زودی = soon
+در آینده = in the future
+مرحله به مرحله = step by step
+گام اول = first step
+نکته مهم = important note
+مشکل = problem
+علت = cause
+راه حل = solution
+مزیت = advantage
+معایب = disadvantages
+نیازمندی = requirement
+محدودیت = limitation
+فرض = assumption
+نمونه = example
+جزئیات = details
+توضیح = explanation
+بررسی = review
+تحلیل = analysis
+مقایسه = comparison
+نتیجه گیری = conclusion
+پیشنهاد = suggestion

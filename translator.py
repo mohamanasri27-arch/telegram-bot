@@ -28,6 +28,16 @@ CODE_RE = re.compile(r"(```.*?```|`[^`\n]+`)", re.DOTALL)
 PLACEHOLDER_PREFIX = "XKEEP"
 PLACEHOLDER_SUFFIX = "X"
 
+# Persian plural endings, optionally preceded by a zero-width non-joiner.
+PLURAL_SUFFIX_RE = r"(‌?ها(?:ی|یی)?)?"
+
+
+def _pluralize(english: str) -> str:
+    """Naive English plural, skipped when the term already reads as plural."""
+    if english.endswith(("s", "S")):
+        return english
+    return english + "s"
+
 
 def is_persian(text: str) -> bool:
     return bool(PERSIAN_RE.search(text))
@@ -39,8 +49,7 @@ class TranslationError(Exception):
 
 class Translator:
     def __init__(self) -> None:
-        _, self._glossary = vocabulary.load_entries()
-        logger.info("Loaded %d glossary terms for translation", len(self._glossary))
+        self._glossary = vocabulary.load_glossary()
 
     def _shield(self, text: str) -> tuple[str, list[str]]:
         """Swap code and glossary terms for placeholders before translating."""
@@ -56,8 +65,15 @@ class Translator:
         # the other way the English term is already what the user would type.
         if is_persian(text):
             for persian, english in self._glossary.items():
-                if persian in text:
-                    text = text.replace(persian, stash(english))
+                if persian not in text:
+                    continue
+                # Absorb an attached Persian plural suffix, otherwise it would be
+                # stranded next to the placeholder and come out as "case fileها".
+                pattern = re.compile(re.escape(persian) + PLURAL_SUFFIX_RE)
+                text = pattern.sub(
+                    lambda m: stash(_pluralize(english) if m.group(1) else english),
+                    text,
+                )
 
         return text, replacements
 

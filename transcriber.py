@@ -45,9 +45,7 @@ class Transcriber:
             if self._model is not None:
                 return
 
-            terms, _ = vocabulary.load_entries()
-            self._hotwords = "، ".join(terms) if terms else None
-            logger.info("Loaded %d domain terms from vocabulary.txt", len(terms))
+            self._hotwords = vocabulary.load_hotwords()
 
             logger.info("Loading Whisper model '%s' (first run downloads it)", self._model_size)
             self._model = await asyncio.to_thread(
