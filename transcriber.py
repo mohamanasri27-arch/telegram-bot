@@ -18,10 +18,10 @@ import vocabulary
 
 logger = logging.getLogger(__name__)
 
-# large-v3-turbo has near-large accuracy on Persian but a much smaller decoder,
-# so it runs several times faster than medium/large on CPU. Override with
-# WHISPER_MODEL in .env (large-v3 = most accurate, noticeably slower).
-DEFAULT_MODEL_SIZE = "large-v3-turbo"
+# Accuracy first: large-v3 keeps all 32 decoder layers, where turbo keeps only 4.
+# That decoder is what gets Persian verb conjugation right, so the extra time is
+# worth it. Switch to the faster model any time with /accuracy.
+DEFAULT_MODEL_SIZE = "large-v3"
 
 # A natural Persian sentence primes the decoder toward correct Persian spelling
 # and punctuation instead of drifting into phonetic nonsense.
@@ -93,8 +93,12 @@ class Transcriber:
                 # A wider beam explores more spellings before committing, which
                 # is where most of the remaining word-level errors come from.
                 beam_size=10,
-                best_of=5,
-                temperature=0.0,
+                # Let the beam keep searching past the first finished candidate.
+                patience=2.0,
+                # Whisper's own recovery ladder: a chunk that decodes badly at 0
+                # is retried at higher temperatures instead of being kept as-is.
+                # Pinning this to a single 0.0 silently disabled that retry.
+                temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
                 vad_filter=True,
                 # Keep the default 2s silence gap so sentences stay whole, but pad
                 # each speech chunk a bit more so quiet word edges aren't clipped.

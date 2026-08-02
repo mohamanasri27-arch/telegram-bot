@@ -19,7 +19,7 @@ ACCURACY_HIGH = "large-v3"
 
 DEFAULTS = {
     "mode": MODE_PLAIN,
-    "model": ACCURACY_FAST,
+    "model": ACCURACY_HIGH,
     "clean_fillers": True,
 }
 
