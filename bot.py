@@ -167,6 +167,7 @@ async def _preload_model(application) -> None:
     logger.info("Preparing the speech model, please wait...")
     try:
         await transcriber.load()
+        logger.info("=== BOT IS READY - you can send messages now ===")
     except Exception:
         logger.exception("Could not preload the speech model; will retry on first voice message")
 
@@ -192,7 +193,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    logger.info("Bot started")
+    logger.info("Connecting to Telegram and loading the speech model...")
     app.run_polling()
 
 
