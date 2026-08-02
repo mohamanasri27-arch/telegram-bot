@@ -9,9 +9,10 @@ is what keeps work-specific jargon and company names from being mangled.
 import asyncio
 import logging
 import os
-from pathlib import Path
 
 from faster_whisper import WhisperModel
+
+import vocabulary
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +20,6 @@ logger = logging.getLogger(__name__)
 # so it runs several times faster than medium/large on CPU. Override with
 # WHISPER_MODEL in .env (large-v3 = most accurate, noticeably slower).
 DEFAULT_MODEL_SIZE = "large-v3-turbo"
-
-VOCABULARY_FILE = Path(__file__).with_name("vocabulary.txt")
 
 # A natural Persian sentence primes the decoder toward correct Persian spelling
 # and punctuation instead of drifting into phonetic nonsense.
@@ -31,18 +30,6 @@ PERSIAN_PRIMER = (
 
 class TranscriptionError(Exception):
     pass
-
-
-def load_vocabulary() -> list[str]:
-    """Read the user's domain terms, ignoring comments and blank lines."""
-    if not VOCABULARY_FILE.exists():
-        return []
-    terms = []
-    for line in VOCABULARY_FILE.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            terms.append(line)
-    return terms
 
 
 class Transcriber:
@@ -58,7 +45,7 @@ class Transcriber:
             if self._model is not None:
                 return
 
-            terms = load_vocabulary()
+            terms, _ = vocabulary.load_entries()
             self._hotwords = "، ".join(terms) if terms else None
             logger.info("Loaded %d domain terms from vocabulary.txt", len(terms))
 
