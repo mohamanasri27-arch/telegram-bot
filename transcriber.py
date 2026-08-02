@@ -9,6 +9,7 @@ is what keeps work-specific jargon and company names from being mangled.
 import asyncio
 import logging
 import os
+import time
 
 from faster_whisper import WhisperModel
 
@@ -71,7 +72,12 @@ class Transcriber:
 
             self._hotwords = vocabulary.load_hotwords()
 
-            logger.info("Loading Whisper model '%s' (first run downloads it)", self._model_size)
+            logger.info(
+                "Loading Whisper model '%s'. On first use this downloads the "
+                "weights, and the bot will not answer messages until it finishes.",
+                self._model_size,
+            )
+            started = time.monotonic()
             self._model = await asyncio.to_thread(
                 WhisperModel,
                 self._model_size,
@@ -79,7 +85,7 @@ class Transcriber:
                 compute_type="int8",
                 cpu_threads=os.cpu_count() or 4,
             )
-            logger.info("Whisper model ready")
+            logger.info("Whisper model ready (took %.0f seconds)", time.monotonic() - started)
 
     async def transcribe(self, audio_path: str) -> str:
         """Transcribe Persian speech from an audio file into Persian text."""

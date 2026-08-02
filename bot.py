@@ -197,13 +197,19 @@ async def toggle_accuracy(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if new == settings.ACCURACY_HIGH:
         status = await update.message.reply_text(
             "🎯 در حال تغییر به مدل *دقیق*...\n\n"
-            "اگر اولین بار باشه، حدود ۳ گیگابایت دانلود می‌شه و چند دقیقه طول می‌کشه. "
-            "پیشرفت رو توی پنجره‌ی اجرا می‌بینی.",
+            "⚠️ *بات تا پایان این کار به هیچ پیامی جواب نمی‌ده* — این طبیعیه، "
+            "خراب نشده. بارگذاری مدل کل بات رو موقتاً قفل می‌کنه.\n\n"
+            "اگر اولین بار باشه حدود ۳ گیگابایت دانلود می‌شه و بسته به سرعت "
+            "اینترنت‌تون چند دقیقه تا نیم ساعت طول می‌کشه.\n\n"
+            "پیشرفت رو توی پنجره‌ی اجرا ببینید. وقتی خط "
+            "`Whisper model ready` اومد، دوباره جواب می‌ده.",
             parse_mode="Markdown",
         )
     else:
         status = await update.message.reply_text(
-            "⚡ در حال برگشت به مدل *سریع*...", parse_mode="Markdown"
+            "⚡ در حال برگشت به مدل *سریع*...\n\n"
+            "بات چند لحظه جواب نمی‌ده تا مدل عوض بشه.",
+            parse_mode="Markdown",
         )
 
     try:
