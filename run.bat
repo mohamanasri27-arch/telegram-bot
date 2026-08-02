@@ -28,6 +28,19 @@ call venv\Scripts\activate.bat
 :restart
 python bot.py
 
+if errorlevel 3 if not errorlevel 4 (
+    echo.
+    echo ============================================
+    echo   Not restarting: another copy of this bot
+    echo   is already running somewhere.
+    echo.
+    echo   Close every other bot window first,
+    echo   then run this file again.
+    echo ============================================
+    pause
+    exit /b 3
+)
+
 echo.
 echo ============================================
 echo   The bot stopped. Restarting in 10 seconds...

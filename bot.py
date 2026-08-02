@@ -10,7 +10,7 @@ import tempfile
 
 from dotenv import load_dotenv
 from telegram import Update
-from telegram.error import TimedOut
+from telegram.error import Conflict, TimedOut
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from transcriber import Transcriber, TranscriptionError
@@ -177,6 +177,30 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             os.remove(audio_path)
 
 
+CONFLICT_EXIT_CODE = 3
+_conflict_detected = False
+
+
+async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Stop cleanly on Conflict instead of letting the restart loop spin forever."""
+    global _conflict_detected
+
+    if isinstance(context.error, Conflict):
+        _conflict_detected = True
+        logger.error(
+            "\n"
+            "============================================================\n"
+            "  ANOTHER COPY OF THIS BOT IS ALREADY RUNNING.\n"
+            "  Telegram allows only one instance per bot token.\n"
+            "  Close every other bot window, then start this one again.\n"
+            "============================================================"
+        )
+        context.application.stop_running()
+        return
+
+    logger.error("Update caused an error", exc_info=context.error)
+
+
 async def _preload_model(application) -> None:
     """Warm the Whisper model at startup so the first voice message isn't slow."""
     logger.info("Preparing the speech model, please wait...")
@@ -207,9 +231,14 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_error_handler(_on_error)
 
     logger.info("Connecting to Telegram and loading the speech model...")
     app.run_polling()
+
+    if _conflict_detected:
+        # Signal run.bat not to restart us into the same collision.
+        raise SystemExit(CONFLICT_EXIT_CODE)
 
 
 if __name__ == "__main__":
