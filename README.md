@@ -278,9 +278,10 @@ videos-out/film/
 | `subtitles.burn` | `"fa"` | `"fa"`، `"en"`، `"both"` یا `"none"` |
 | `subtitles.font` | `"Tahoma"` | هر فونتی که روی ویندوز نصب باشد |
 | `subtitles.translate_english` | `true` | ساخت زیرنویس انگلیسی (کمی کند است) |
-| `clips.count` | `5` | تعداد کلیپ‌های کوتاه |
+| `clips.count` | `5` | تعداد ریلزها |
+| `clips.min_seconds` / `max_seconds` | `15` / `30` | طول هر ریلز به ثانیه |
 | `clips.framing` | `"crop"` | `"crop"` وسط تصویر را نگه می‌دارد، `"blur"` کل تصویر را |
-| `clips.min_source_seconds` | `90` | ویدیوی کوتاه‌تر از این تکه‌تکه نمی‌شود |
+| `clips.min_source_seconds` | `60` | ویدیوی کوتاه‌تر از این تکه‌تکه نمی‌شود |
 | `output.height` | `""` | خالی یعنی همان کیفیت اصلی؛ یا مثلاً `1080` |
 | `whisper.model` | `""` | خالی یعنی همان مدلی که بات استفاده می‌کند |
 

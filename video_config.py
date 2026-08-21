@@ -74,8 +74,10 @@ DEFAULTS = {
         # Cut the long video into short vertical clips for Reels/Shorts/TikTok.
         "enabled": True,
         "count": 5,
-        "min_seconds": 25.0,
-        "max_seconds": 60.0,
+        # Instagram Reels hold attention best well under a minute, so the
+        # window is tighter than the YouTube Shorts limit would allow.
+        "min_seconds": 15.0,
+        "max_seconds": 30.0,
         "aspect": "9:16",
         "width": 1080,
         "height": 1920,
@@ -85,8 +87,9 @@ DEFAULTS = {
         # Shift the crop window sideways, -1.0 (far left) to 1.0 (far right).
         "crop_offset": 0.0,
         "burn_subtitles": True,
-        # Only cut clips when the video is at least this long.
-        "min_source_seconds": 90.0,
+        # Only cut clips when the video is at least this long. Follows the clip
+        # length above: a 60s source can still yield two 30s Reels.
+        "min_source_seconds": 60.0,
     },
 
     "branding": {
