@@ -5,11 +5,16 @@ restrictions. Model weights are downloaded once and cached for every run after.
 
 Domain vocabulary from vocabulary.txt is fed to the decoder as hotwords, which
 is what keeps work-specific jargon and company names from being mangled.
+
+Two shapes of output are offered. transcribe() returns one block of text, which
+is what the Telegram bot sends back. transcribe_cues() returns short timed
+chunks, which is what the video editor turns into subtitles.
 """
 import asyncio
 import logging
 import os
 import time
+from dataclasses import dataclass
 
 from faster_whisper import WhisperModel
 
@@ -29,6 +34,21 @@ DEFAULT_MODEL_SIZE = "large-v3"
 PERSIAN_PRIMER = (
     "خب، امروز درباره‌ی کار و پروژه‌هایی که در محیط کارمان انجام می‌دهیم صحبت می‌کنم."
 )
+
+# A pause this long inside a sentence is a natural place to start a new cue.
+CUE_BREAK_GAP_SECONDS = 0.55
+
+# Ending a cue here reads far better than breaking mid-clause.
+SENTENCE_ENDINGS = (".", "؟", "!", "؛", "…", "?")
+
+
+@dataclass(frozen=True)
+class TimedText:
+    """One subtitle-sized chunk of speech with the seconds it covers."""
+
+    start: float
+    end: float
+    text: str
 
 
 class TranscriptionError(Exception):
@@ -87,15 +107,16 @@ class Transcriber:
             )
             logger.info("Whisper model ready (took %.0f seconds)", time.monotonic() - started)
 
-    async def transcribe(self, audio_path: str) -> str:
-        """Transcribe Persian speech from an audio file into Persian text."""
+    async def _decode(self, audio_path: str, language: str, word_timestamps: bool) -> list:
+        """Run the decoder and return faster-whisper's own segment objects."""
         await self.load()
 
+        persian = language == "fa"
         try:
             segments, _ = await asyncio.to_thread(
                 self._model.transcribe,
                 audio_path,
-                language="fa",
+                language=language,
                 # A wider beam explores more spellings before committing, which
                 # is where most of the remaining word-level errors come from.
                 beam_size=10,
@@ -109,17 +130,100 @@ class Transcriber:
                 # Keep the default 2s silence gap so sentences stay whole, but pad
                 # each speech chunk a bit more so quiet word edges aren't clipped.
                 vad_parameters={"speech_pad_ms": 600},
-                initial_prompt=PERSIAN_PRIMER,
-                hotwords=self._hotwords,
+                # Both of these are tuned for Persian, so they are only helpful
+                # when Persian is what is being decoded.
+                initial_prompt=PERSIAN_PRIMER if persian else None,
+                hotwords=self._hotwords if persian else None,
                 # Each chunk decodes independently, so one bad chunk can no longer
                 # drag the rest into a repetition loop.
                 condition_on_previous_text=False,
+                word_timestamps=word_timestamps,
             )
-            raw = " ".join(segment.text.strip() for segment in segments)
-            cleaned = persian_text.normalize(raw)
-            if settings.get("clean_fillers"):
-                cleaned = persian_text.remove_fillers(cleaned)
-            return cleaned
+            # The generator does the real work, so drain it inside the thread's
+            # error handling rather than leaving it to explode further up.
+            return list(segments)
         except Exception as exc:
             logger.exception("Transcription failed for %s", audio_path)
             raise TranscriptionError("transcription_failed") from exc
+
+    def _clean(self, text: str, language: str) -> str:
+        """Apply the Persian tidy-ups, which do not apply to other languages."""
+        if language != "fa":
+            return " ".join(text.split())
+        cleaned = persian_text.normalize(text)
+        if settings.get("clean_fillers"):
+            cleaned = persian_text.remove_fillers(cleaned)
+        return cleaned
+
+    async def transcribe(self, audio_path: str) -> str:
+        """Transcribe Persian speech from an audio file into Persian text."""
+        segments = await self._decode(audio_path, language="fa", word_timestamps=False)
+        raw = " ".join(segment.text.strip() for segment in segments)
+        return self._clean(raw, "fa")
+
+    async def transcribe_cues(
+        self,
+        audio_path: str,
+        *,
+        language: str = "fa",
+        max_chars: int = 84,
+        max_seconds: float = 4.5,
+    ) -> list[TimedText]:
+        """Transcribe into short timed chunks suitable for subtitles.
+
+        Whisper's own segments are whole sentences and routinely run past ten
+        seconds, which is far too much text to put on screen at once. Word-level
+        timestamps let the speech be re-grouped into cues that break at pauses
+        and sentence endings instead of at arbitrary points.
+        """
+        segments = await self._decode(audio_path, language=language, word_timestamps=True)
+
+        words = []
+        for segment in segments:
+            segment_words = getattr(segment, "words", None)
+            if segment_words:
+                words.extend(segment_words)
+            elif (segment.text or "").strip():
+                # No word timings available: keep the segment whole rather than
+                # inventing timings that would drift out of sync.
+                words.append(
+                    TimedText(segment.start, segment.end, segment.text.strip())
+                )
+
+        cues: list[TimedText] = []
+        buffer: list[str] = []
+        start: float | None = None
+        end: float = 0.0
+
+        def flush() -> None:
+            nonlocal buffer, start
+            if buffer and start is not None:
+                text = self._clean("".join(buffer), language)
+                if text:
+                    cues.append(TimedText(start, max(end, start + 0.4), text))
+            buffer = []
+            start = None
+
+        for word in words:
+            token = getattr(word, "word", None)
+            if token is None:
+                token = word.text
+            if not token.strip():
+                continue
+
+            gap = word.start - end if start is not None else 0.0
+            too_long = start is not None and (word.end - start) > max_seconds
+            too_wide = sum(len(part) for part in buffer) + len(token) > max_chars
+            if start is not None and (gap > CUE_BREAK_GAP_SECONDS or too_long or too_wide):
+                flush()
+
+            if start is None:
+                start = word.start
+            buffer.append(token)
+            end = word.end
+
+            if token.rstrip().endswith(SENTENCE_ENDINGS):
+                flush()
+
+        flush()
+        return cues

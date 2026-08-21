@@ -120,3 +120,48 @@ class Translator:
             raise TranslationError("empty_response")
 
         return self._restore(translated, replacements).strip()
+
+    async def translate_many(self, texts: list[str], batch_size: int = 20) -> list[str]:
+        """Translate a list of short strings, keeping them one-to-one.
+
+        Subtitle cues are translated individually rather than as one block:
+        a block comes back as better English, but with no way to tell which
+        words belong to which cue, and a subtitle that is out of step with the
+        picture is worse than a slightly clumsy one.
+
+        A batch that fails after its retries yields the original text rather
+        than raising, so a network hiccup costs the English subtitles and not
+        the whole edit.
+        """
+        results: list[str] = []
+        for offset in range(0, len(texts), batch_size):
+            chunk = texts[offset:offset + batch_size]
+            shielded = [self._shield(persian_text.normalize(text)) for text in chunk]
+
+            translated: list[str] | None = None
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    translated = await asyncio.to_thread(
+                        GoogleTranslator(source="auto", target="en").translate_batch,
+                        [item[0] for item in shielded],
+                    )
+                    break
+                except Exception:
+                    logger.warning(
+                        "Batch translation failed (attempt %d/%d)", attempt, MAX_RETRIES
+                    )
+                    if attempt == MAX_RETRIES:
+                        break
+                    await asyncio.sleep(RETRY_BASE_DELAY * attempt)
+
+            if not translated or len(translated) != len(chunk):
+                logger.warning("Falling back to the original text for %d cues", len(chunk))
+                results.extend(chunk)
+                continue
+
+            results.extend(
+                self._restore(value or "", shielded[index][1]).strip()
+                for index, value in enumerate(translated)
+            )
+
+        return results

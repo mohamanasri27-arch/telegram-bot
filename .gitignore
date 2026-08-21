@@ -6,3 +6,9 @@ venv/
 # Written at runtime; must survive bot updates.
 settings.json
 my_terms.txt
+
+# Video editor: user config, working folders and generated media
+video_settings.json
+videos-in/
+videos-out/
+assets/
