@@ -19,6 +19,7 @@ OUTBOX_DIR = PROJECT_DIR / "videos-out"
 ASSETS_DIR = PROJECT_DIR / "assets"
 
 DEFAULTS = {
+    # The language actually spoken in the video.
     "language": "fa",
 
     "cleanup": {
@@ -41,33 +42,90 @@ DEFAULTS = {
         "color_polish": True,
     },
 
+    # Everything here exists to make the transcript more accurate. None of it
+    # changes the sound of the finished video.
+    "accuracy": {
+        # Clean the audio before the recogniser hears it. This copy is thrown
+        # away afterwards, so it never affects what the viewer hears.
+        "clean_audio_first": True,
+        "denoise": True,
+        "even_out_levels": True,
+        # One sentence saying what the video is about, in the spoken language.
+        # This is the single biggest win available for jargon and names:
+        # told the subject, the recogniser stops turning unfamiliar words into
+        # ordinary ones that sound similar.
+        #   e.g. "این ویدیو درباره‌ی برنامه‌نویسی، وایب کدینگ و ساخت وب‌سایت است."
+        "topic": "",
+        # Let each chunk see the running transcript. Reads better on clean
+        # single-speaker audio; on noisy audio it can spiral into repetition.
+        "use_context": False,
+    },
+
     "subtitles": {
         "enabled": True,
-        # Which language gets burned onto the picture:
-        # "fa", "en", "both", or "none" (SRT files are still written).
-        "burn": "fa",
-        # Font must be installed on this computer. Tahoma ships with Windows
-        # and covers Persian. Vazirmatn looks better if you install it.
-        "font": "Tahoma",
-        "english_font": "Arial",
-        # Percentage of the video height, so it scales with the resolution.
+        # Languages burned onto the picture, in order. The first is the main
+        # one and sits above, larger; a second sits under it, smaller.
+        # []  or "none" burns nothing. Examples:
+        #   ["fa"]        just Persian
+        #   ["fa", "en"]  Persian over English
+        #   ["de"]        German only
+        "burn": ["fa"],
+        # Languages to translate into, for the .srt files (and available to
+        # burn). The spoken language is always included for free.
+        "translate_to": ["en", "de"],
+        # Fonts per language. Must be installed on this computer. Tahoma ships
+        # with Windows and covers Persian; Vazirmatn looks better if installed.
+        "fonts": {
+            "fa": "Tahoma",
+            "en": "Arial",
+            "de": "Arial",
+            "default": "Arial",
+        },
+        # Percentages of the video height, so they scale with the resolution.
         "font_size_pct": 5.2,
-        "english_font_size_pct": 3.2,
+        "secondary_font_size_pct": 3.2,
         "primary_color": "#FFFFFF",
         "outline_color": "#000000",
-        "outline_width": 2.6,
-        "shadow": 0.8,
+        # The colour of a word not yet spoken, used only by the karaoke
+        # animation. Grey keeps the highlight monochrome.
+        "dim_color": "#8C8C8C",
+        "outline_width": 3.0,
+        "shadow": 0.6,
+        "bold": True,
         # Distance from the bottom edge, as a percentage of video height.
         "margin_bottom_pct": 7.0,
         # Cue shaping: shorter cues are easier to read than whole sentences.
         "max_chars_per_line": 42,
         "max_lines": 2,
         "max_cue_seconds": 4.5,
+        # How the text arrives on screen. All of these are monochrome and
+        # short on purpose — the point is to stop text appearing with a jolt.
+        #   none      appears instantly
+        #   fade      soft fade in and out          (default)
+        #   rise      fades in while sliding up a little
+        #   pop       fades in while scaling up slightly
+        #   karaoke   each word brightens as it is spoken
+        "animation": "fade",
+        "animation_ms": 180,
         # Write .srt files next to the video as well as burning them in.
         "write_srt": True,
-        # Translate every cue into English for the .en.srt file. This is a
-        # network request per cue, so turn it off if you only need Persian.
-        "translate_english": True,
+    },
+
+    # Extras that suit a promo or teaser. All optional, all off by default.
+    "promo": {
+        # A line held over the opening seconds — the hook.
+        "hook_text": "",
+        "hook_seconds": 3.0,
+        "hook_position": "top",
+        "hook_size_pct": 5.5,
+        # A closing card: your handle, a call to action, a website.
+        "end_card_text": "",
+        "end_card_seconds": 2.5,
+        "end_card_background": "#101820",
+        "end_card_size_pct": 6.0,
+        # A slow zoom on the vertical clips, to keep a locked-off shot alive.
+        # 0 is off; 0.05 (five percent across the clip) is felt, not seen.
+        "punch_in": 0.0,
     },
 
     "clips": {
@@ -110,7 +168,17 @@ DEFAULTS = {
     },
 
     "output": {
+        # Shape of the finished video:
+        #   source     leave it as filmed          (default)
+        #   vertical   1080x1920, for Reels and Stories
+        #   square     1080x1080, for the feed
+        #   landscape  1920x1080, for YouTube
+        "format": "source",
+        # How a reframe fills the new shape: "crop" or "blur". Same meaning as
+        # in clips above.
+        "framing": "crop",
         # "" keeps the source resolution. Otherwise a height like 1080 or 720.
+        # Ignored unless format is "source".
         "height": "",
         "crf": 20,
         "preset": "medium",
@@ -127,6 +195,19 @@ DEFAULTS = {
         "model": "",
     },
 }
+
+
+# Named output shapes, as (width, height).
+FORMATS = {
+    "vertical": (1080, 1920),
+    "square": (1080, 1080),
+    "landscape": (1920, 1080),
+}
+
+
+def frame_size(name: str) -> tuple[int, int] | None:
+    """The pixel size for a named output format, or None to keep the source."""
+    return FORMATS.get(str(name or "source").strip().lower())
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

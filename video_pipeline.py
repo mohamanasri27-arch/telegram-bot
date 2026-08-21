@@ -24,7 +24,7 @@ import clipper
 import ffmpeg_tools
 import subtitles
 import video_config
-from subtitles import SubtitleCue
+from subtitles import SubtitleCue, TimedWord
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +61,24 @@ def is_video(path: Path) -> bool:
 
 def _body_filters(config: dict, info: ffmpeg_tools.MediaInfo) -> tuple[str, str]:
     cleanup = config["cleanup"]
+    output = config["output"]
 
     video_parts: list[str] = []
-    target_height = config["output"].get("height")
-    if target_height:
-        scale = ffmpeg_tools.scale_filter(int(target_height), info)
-        if scale:
-            video_parts.append(scale)
+    shape = video_config.frame_size(output.get("format", "source"))
+    if shape:
+        # Reframing the whole edit, not just the clips: an ad is often shot
+        # once and needed vertical.
+        video_parts.append(
+            ffmpeg_tools.vertical_filter(
+                info, shape[0], shape[1], str(output.get("framing", "crop")), 0.0
+            )
+        )
+    else:
+        target_height = output.get("height")
+        if target_height:
+            scale = ffmpeg_tools.scale_filter(int(target_height), info)
+            if scale:
+                video_parts.append(scale)
     if cleanup.get("color_polish", True):
         # A lift, not a look. Anything stronger starts making skin tones lie.
         video_parts.append("eq=contrast=1.05:saturation=1.07:gamma=1.02")
@@ -137,31 +148,73 @@ def _build_body(source: Path, destination: Path, config: dict, info: ffmpeg_tool
 async def _transcribe(
     body: Path, workdir: Path, config: dict, transcriber, translator
 ) -> list[SubtitleCue]:
-    """Transcribe the cut body, and translate it if English is wanted.
-
-    The `persian` field holds whatever language was spoken and `english` holds
-    its translation, which is what the two subtitle styles map onto.
-    """
+    """Transcribe the cut body, and translate it into every wanted language."""
     sub_config = config["subtitles"]
-    speech = workdir / "speech.wav"
-    ffmpeg_tools.extract_audio(body, speech)
+    accuracy = config["accuracy"]
+    language = str(config.get("language", "fa"))
 
-    timed = await transcriber.transcribe_cues(
+    speech = workdir / "speech.wav"
+    # The recogniser gets its own cleaned-up copy of the audio. Nobody listens
+    # to this file, so scrubbing it costs nothing and buys real accuracy.
+    audio_filter = (
+        ffmpeg_tools.speech_filter(accuracy)
+        if accuracy.get("clean_audio_first", True)
+        else None
+    )
+    ffmpeg_tools.extract_audio(body, speech, audio_filter)
+
+    decoded = await transcriber.transcribe_cues(
         str(speech),
-        language=str(config.get("language", "fa")),
+        language=language,
         max_chars=int(sub_config.get("max_chars_per_line", 42))
         * max(1, int(sub_config.get("max_lines", 2))),
         max_seconds=float(sub_config.get("max_cue_seconds", 4.5)),
+        topic=str(accuracy.get("topic") or "") or None,
+        use_context=bool(accuracy.get("use_context", False)),
     )
-    cues = [SubtitleCue(item.start, item.end, persian=item.text) for item in timed]
 
-    if cues and sub_config.get("translate_english", True):
-        logger.info("Translating %d subtitle cues into English", len(cues))
-        english = await translator.translate_many([cue.persian for cue in cues])
-        for cue, translation in zip(cues, english):
-            cue.english = translation
+    cues = [
+        SubtitleCue(
+            start=item.start,
+            end=item.end,
+            source=language,
+            texts={language: item.text},
+            words=[TimedWord(word.start, word.end, word.text) for word in item.words],
+        )
+        for item in decoded
+    ]
+    if not cues:
+        return cues
+
+    for target in _translation_targets(config):
+        logger.info("Translating %d cues into %s", len(cues), target)
+        translated = await translator.translate_many(
+            [cue.source_text for cue in cues], target=target
+        )
+        for cue, text in zip(cues, translated):
+            cue.texts[target] = text
 
     return cues
+
+
+def _cue_languages(cues: list[SubtitleCue], config: dict) -> list[str]:
+    """Every language the cues actually carry text in, spoken one first."""
+    language = str(config.get("language", "fa"))
+    languages = [language]
+    for code in _translation_targets(config):
+        if any(cue.text_for(code).strip() for cue in cues):
+            languages.append(code)
+    return languages
+
+
+def _translation_targets(config: dict) -> list[str]:
+    """Languages worth paying for: those asked for, plus any being burned in."""
+    language = str(config.get("language", "fa"))
+    sub_config = config["subtitles"]
+    wanted = list(sub_config.get("translate_to") or [])
+    wanted += subtitles.normalise_burn(sub_config.get("burn"), language)
+    # dict.fromkeys keeps the order while dropping repeats.
+    return [code for code in dict.fromkeys(wanted) if code and code != language]
 
 
 # --------------------------------------------------------------------------
@@ -225,6 +278,73 @@ def _normalise_segment(
     return video_label, audio_label, info.duration
 
 
+HOOK_ALIGNMENTS = {"top": 8, "middle": 5, "bottom": 2}
+
+
+def _hook_overlays(promo: dict, language: str) -> list[subtitles.TextOverlay]:
+    """The opening line, if one was asked for."""
+    text = str(promo.get("hook_text") or "").strip()
+    if not text:
+        return []
+    return [
+        subtitles.TextOverlay(
+            start=0.0,
+            end=max(0.5, float(promo.get("hook_seconds", 3.0))),
+            text=text,
+            language=language,
+            alignment=HOOK_ALIGNMENTS.get(str(promo.get("hook_position", "top")), 8),
+            size_pct=float(promo.get("hook_size_pct", 5.5)),
+        )
+    ]
+
+
+def _end_card_segment(
+    builder: "_GraphBuilder",
+    promo: dict,
+    sub_config: dict,
+    language: str,
+    width: int,
+    height: int,
+    fps: float,
+    workdir: Path,
+) -> tuple[str, str, float] | None:
+    """Build a closing card out of a plain colour and one line of text.
+
+    The text goes on as a subtitle rather than through ffmpeg's drawtext,
+    because drawtext does no Arabic shaping: Persian would come out as
+    disconnected letters in the wrong order. libass shapes it properly.
+    """
+    text = str(promo.get("end_card_text") or "").strip()
+    if not text:
+        return None
+
+    seconds = max(0.5, float(promo.get("end_card_seconds", 2.5)))
+    colour = str(promo.get("end_card_background", "#101820")).replace("#", "0x")
+
+    video_index = builder.add_input(
+        ffmpeg_tools.colour_input(colour, width, height, fps, seconds)
+    )
+    audio_index = builder.add_input(ffmpeg_tools.silence_input(seconds))
+
+    ass_name = "endcard.ass"
+    subtitles.write_ass(
+        [], workdir / ass_name, sub_config, width, height, [],
+        overlays=[
+            subtitles.TextOverlay(
+                start=0.0, end=seconds, text=text, language=language,
+                alignment=5, size_pct=float(promo.get("end_card_size_pct", 6.0)),
+                margin_pct=0.0,
+            )
+        ],
+    )
+
+    builder.add(
+        f"[{video_index}:v]ass={ass_name},setsar=1,fps={fps:.4f},format=yuv420p[cardv]"
+    )
+    builder.add(f"[{audio_index}:a]{_AUDIO_FORMAT}[carda]")
+    return "[cardv]", "[carda]", seconds
+
+
 def _finish(
     body: Path,
     destination: Path,
@@ -236,7 +356,9 @@ def _finish(
     """Burn subtitles, add music, logo, intro/outro and fades in one encode."""
     branding = config["branding"]
     sub_config = config["subtitles"]
+    promo = config["promo"]
     output = config["output"]
+    language = str(config.get("language", "fa"))
     notes: list[str] = []
 
     width, height, fps = body_info.width, body_info.height, body_info.fps
@@ -244,14 +366,26 @@ def _finish(
 
     # --- picture -----------------------------------------------------------
     video_chain = [f"fps={fps:.4f}", "setsar=1"]
-    burn_mode = str(sub_config.get("burn", subtitles.BURN_PERSIAN))
-    if sub_config.get("enabled", True) and burn_mode != subtitles.BURN_NONE and cues:
+
+    burn = subtitles.normalise_burn(sub_config.get("burn"), language)
+    if not sub_config.get("enabled", True):
+        burn = []
+    overlays = _hook_overlays(promo, language)
+    burn_cues = cues if burn else []
+
+    # The hook is drawn from the same subtitle file, so it costs no extra pass.
+    if burn_cues or overlays:
         ass_name = "main.ass"
-        subtitles.write_ass(cues, workdir / ass_name, sub_config, width, height, burn_mode)
+        subtitles.write_ass(
+            burn_cues, workdir / ass_name, sub_config, width, height, burn, overlays
+        )
         # Relative name plus cwd=workdir: a Windows absolute path inside a
         # filter would need its colon and backslashes escaped three times over.
         video_chain.append(f"ass={ass_name}")
-        notes.append(f"burned {len(cues)} {burn_mode} subtitle cues")
+        if burn_cues:
+            notes.append(f"burned {len(burn_cues)} cues in {'+'.join(burn)}")
+        if overlays:
+            notes.append("held the hook line over the opening")
     video_chain.append("format=yuv420p")
     builder.add(f"[0:v]{','.join(video_chain)}[bodyv]")
     body_video = "[bodyv]"
@@ -329,6 +463,13 @@ def _finish(
         segments.append((video_label, audio_label))
         total_duration += duration
         notes.append("added the outro")
+
+    card = _end_card_segment(builder, promo, sub_config, language, width, height, fps, workdir)
+    if card:
+        video_label, audio_label, duration = card
+        segments.append((video_label, audio_label))
+        total_duration += duration
+        notes.append("added the closing card")
 
     if len(segments) > 1:
         joined = "".join(f"{video}{audio}" for video, audio in segments)
@@ -412,20 +553,24 @@ async def edit(
             logger.exception("Transcription failed; continuing without subtitles")
             result.notes.append("transcription failed, no subtitles")
 
+    languages = _cue_languages(cues, config)
+
     if cues and config["subtitles"].get("write_srt", True):
-        for language, suffix in (("fa", f"{stem}.fa.srt"), ("en", f"{stem}.en.srt")):
-            written = subtitles.write_srt(cues, output_dir / suffix, language)
+        for code in languages:
+            written = subtitles.write_srt(cues, output_dir / f"{stem}.{code}.srt", code)
             if written:
                 result.subtitle_files.append(written)
 
     if cues and config["output"].get("write_transcript", True):
-        transcript = output_dir / f"{stem}.transcript.txt"
-        body_text = subtitles.transcript_text(cues, "fa")
-        english_text = subtitles.transcript_text(cues, "en")
-        if english_text:
-            body_text = f"{body_text}\n\n---\n\n{english_text}"
-        transcript.write_text(body_text + "\n", encoding="utf-8-sig")
-        result.transcript = transcript
+        blocks = []
+        for code in languages:
+            text = subtitles.transcript_text(cues, code)
+            if text:
+                blocks.append(f"[{code}]\n{text}")
+        if blocks:
+            transcript = output_dir / f"{stem}.transcript.txt"
+            transcript.write_text("\n\n---\n\n".join(blocks) + "\n", encoding="utf-8-sig")
+            result.transcript = transcript
 
     logger.info("Finishing: subtitles, music, branding...")
     edited = output_dir / f"{stem}-edited.mp4"
@@ -441,12 +586,15 @@ async def edit(
             logger.info("Cutting %d vertical clips...", len(highlights))
             clip_dir = output_dir / f"{stem}-clips"
             clip_dir.mkdir(exist_ok=True)
+            punch_in = max(0.0, float(config["promo"].get("punch_in", 0.0)))
             for number, highlight in enumerate(highlights, start=1):
                 destination = clip_dir / f"clip-{number:02d}.mp4"
                 try:
                     clipper.render_clip(
                         body, destination, highlight, cues, clip_config,
                         body_info, config["output"], config["subtitles"], workdir,
+                        source_language=str(config.get("language", "fa")),
+                        punch_in=punch_in,
                     )
                     result.clips.append(destination)
                 except ffmpeg_tools.FFmpegError:

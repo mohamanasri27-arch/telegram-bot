@@ -1,30 +1,36 @@
-"""Turn timed speech into subtitle files, in both Persian and English.
+"""Turn timed speech into subtitle files, in any language, plainly styled.
 
 ASS rather than SRT is used for the burned-in subtitles because SRT carries no
 styling: font, size, outline and position would all fall back to whatever the
-renderer felt like. ASS pins them.
+renderer felt like. ASS pins them, and it is also what makes animation and
+word-by-word highlighting possible at all.
 
 Persian is right-to-left, which libass handles on its own through fribidi as
 long as the text is stored in logical order — the order it is spoken. Nothing
 here should reverse it. What does need doing by hand is line breaking, since
 WrapStyle 2 turns off automatic wrapping so that a line never breaks in a place
-that reads badly in Persian.
+that reads badly.
+
+Nothing here knows that Persian is special. A cue holds a dict of language code
+to text, so burning Persian over German is the same code path as Persian over
+English — only the font and the character-width estimate change.
 """
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Persian and English are written into the same file as two named styles.
-STYLE_PERSIAN = "FA"
-STYLE_ENGLISH = "EN"
-
-BURN_PERSIAN = "fa"
-BURN_ENGLISH = "en"
-BURN_BOTH = "both"
 BURN_NONE = "none"
+
+# Scripts that read right to left. libass reorders these itself; the list is
+# here only to pick sensible defaults for width estimates and fonts.
+RTL_LANGUAGES = {"fa", "ar", "ur", "he", "ps", "ku"}
+
+# Languages written in Arabic script, whose letters join and so average
+# narrower per character than Latin ones.
+ARABIC_SCRIPT_LANGUAGES = {"fa", "ar", "ur", "ps", "ku"}
 
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
 
@@ -34,26 +40,78 @@ _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
 # in proportion with the 16:9 edit it was cut from, and leaves 16:9 untouched.
 VERTICAL_REFERENCE_RATIO = 1.4
 
-# Average glyph advance as a fraction of the font size. Arabic script is the
-# narrower of the two because its letters join.
+# Average glyph advance as a fraction of the font size.
 LATIN_CHAR_RATIO = 0.55
 ARABIC_CHAR_RATIO = 0.48
 
 # Multiplier from font size to the height one line of it occupies.
 LINE_HEIGHT_RATIO = 1.45
 
+# Animation styles. All of them are monochrome and short on purpose: the point
+# is to stop text appearing with a jolt, not to decorate it.
+ANIMATION_NONE = "none"
+ANIMATION_FADE = "fade"
+ANIMATION_RISE = "rise"
+ANIMATION_POP = "pop"
+ANIMATION_KARAOKE = "karaoke"
+ANIMATIONS = (ANIMATION_NONE, ANIMATION_FADE, ANIMATION_RISE, ANIMATION_POP, ANIMATION_KARAOKE)
 
-@dataclass
-class SubtitleCue:
-    """One on-screen line, with either or both languages filled in."""
+# How far "rise" travels, as a fraction of the font size.
+RISE_DISTANCE_RATIO = 0.55
+
+
+@dataclass(frozen=True)
+class TimedWord:
+    """One spoken word and the seconds it occupies."""
 
     start: float
     end: float
-    persian: str = ""
-    english: str = ""
+    text: str
+
+
+@dataclass
+class SubtitleCue:
+    """One on-screen line, in however many languages have been filled in."""
+
+    start: float
+    end: float
+    source: str = "fa"
+    texts: dict[str, str] = field(default_factory=dict)
+    # Word timings for the spoken language, kept only for karaoke highlighting.
+    words: list[TimedWord] = field(default_factory=list)
+
+    @property
+    def source_text(self) -> str:
+        return self.texts.get(self.source, "")
 
     def text_for(self, language: str) -> str:
-        return self.persian if language == BURN_PERSIAN else self.english
+        return self.texts.get(language, "")
+
+
+@dataclass(frozen=True)
+class TextOverlay:
+    """A caption that is not speech: a hook line, a label, a call to action."""
+
+    start: float
+    end: float
+    text: str
+    language: str = "fa"
+    # 8 = top centre, 5 = middle centre, 2 = bottom centre (ASS numpad layout).
+    alignment: int = 8
+    size_pct: float = 5.0
+    margin_pct: float = 8.0
+
+
+def is_rtl(language: str) -> bool:
+    return language in RTL_LANGUAGES
+
+
+def char_ratio(language: str) -> float:
+    return ARABIC_CHAR_RATIO if language in ARABIC_SCRIPT_LANGUAGES else LATIN_CHAR_RATIO
+
+
+def style_name(language: str) -> str:
+    return f"L{language.upper()}"
 
 
 def _ass_colour(value: str, alpha: int = 0) -> str:
@@ -98,22 +156,35 @@ def wrap(text: str, max_chars: int, max_lines: int, hard_limit: int | None = Non
     number of characters that physically fit across the frame, and going past
     it would push the text off both edges of the picture.
     """
-    words = text.split()
-    if not words:
+    return [" ".join(line) for line in wrap_tokens(text.split(), max_chars, max_lines, hard_limit)]
+
+
+def wrap_tokens(
+    tokens: list[str], max_chars: int, max_lines: int, hard_limit: int | None = None
+) -> list[list[str]]:
+    """The same wrapping, but keeping the words separate.
+
+    Karaoke needs to know which word landed on which line, which is lost the
+    moment the line is joined into a string.
+    """
+    if not tokens:
         return []
 
     ceiling = hard_limit if hard_limit is not None else max(8, max_chars)
     budget = min(max(8, max_chars), ceiling)
+    lines: list[list[str]] = []
     for _ in range(4):
-        lines: list[str] = []
-        current = ""
-        for word in words:
-            candidate = f"{current} {word}".strip()
-            if current and len(candidate) > budget:
+        lines = []
+        current: list[str] = []
+        length = 0
+        for token in tokens:
+            addition = len(token) + (1 if current else 0)
+            if current and length + addition > budget:
                 lines.append(current)
-                current = word
+                current, length = [token], len(token)
             else:
-                current = candidate
+                current.append(token)
+                length += addition
         if current:
             lines.append(current)
         if len(lines) <= max_lines or budget >= ceiling:
@@ -138,31 +209,133 @@ def _escape_ass(text: str) -> str:
     return text.replace("{", "(").replace("}", ")")
 
 
+def _font_for(config: dict, language: str) -> str:
+    fonts = config.get("fonts") or {}
+    if language in fonts and fonts[language]:
+        return fonts[language]
+    if fonts.get("default"):
+        return fonts["default"]
+    return "Tahoma" if language in ARABIC_SCRIPT_LANGUAGES else "Arial"
+
+
 def _style_line(
     name: str, font: str, size: int, config: dict, margin_v: int, side_margin: int
 ) -> str:
     primary = _ass_colour(config.get("primary_color", "#FFFFFF"))
     outline = _ass_colour(config.get("outline_color", "#000000"))
+    # Secondary is the "not spoken yet" colour, which only karaoke uses. A dim
+    # grey keeps the highlight monochrome; ASS's red default would not.
+    secondary = _ass_colour(config.get("dim_color", "#8C8C8C"))
+    bold = 1 if config.get("bold", True) else 0
     return (
-        f"Style: {name},{font},{size},{primary},&H000000FF,{outline},&H80000000,"
-        f"0,0,0,0,100,100,0,0,1,"
-        f"{float(config.get('outline_width', 2.6)):.1f},"
-        f"{float(config.get('shadow', 0.8)):.1f},"
+        f"Style: {name},{font},{size},{primary},{secondary},{outline},&H80000000,"
+        f"{bold},0,0,0,100,100,0,0,1,"
+        f"{float(config.get('outline_width', 3.0)):.1f},"
+        f"{float(config.get('shadow', 0.6)):.1f},"
         f"2,{side_margin},{side_margin},{margin_v},1"
     )
 
 
-def build_ass(
-    cues: list[SubtitleCue], config: dict, width: int, height: int, mode: str
-) -> str:
-    """Render the cues as an ASS subtitle document."""
-    reference = _reference_height(width, height)
-    persian_size = max(12, int(reference * float(config.get("font_size_pct", 5.2)) / 100))
-    english_size = max(10, int(reference * float(config.get("english_font_size_pct", 3.2)) / 100))
-    base_margin = max(10, int(height * float(config.get("margin_bottom_pct", 7.0)) / 100))
+def _fade_tag(milliseconds: int) -> str:
+    return f"\\fad({milliseconds},{min(milliseconds, 160)})"
 
-    show_persian = mode in (BURN_PERSIAN, BURN_BOTH)
-    show_english = mode in (BURN_ENGLISH, BURN_BOTH)
+
+def _animation_prefix(
+    animation: str, milliseconds: int, centre_x: int, baseline_y: int, rise: int
+) -> str:
+    """The ASS override block that opens an animated line."""
+    if animation == ANIMATION_NONE:
+        return ""
+    if animation == ANIMATION_POP:
+        return (
+            "{" + _fade_tag(milliseconds)
+            + f"\\fscx92\\fscy92\\t(0,{milliseconds},\\fscx100\\fscy100)" + "}"
+        )
+    if animation == ANIMATION_RISE:
+        # \move needs absolute coordinates, so the line also has to carry its
+        # own anchor: \an2 puts the anchor at the bottom centre of the block,
+        # which is where the style's margins would have put it anyway.
+        return (
+            "{\\an2"
+            + f"\\move({centre_x},{baseline_y + rise},{centre_x},{baseline_y},0,{milliseconds})"
+            + _fade_tag(milliseconds) + "}"
+        )
+    # Both fade and karaoke open with a plain fade; karaoke adds its own
+    # per-word tags to the body.
+    return "{" + _fade_tag(milliseconds) + "}"
+
+
+def _karaoke_body(
+    cue: SubtitleCue, lines_of_words: list[list[str]], words: list[TimedWord]
+) -> str | None:
+    """Lay \\k timings over the wrapped text so words light up as spoken.
+
+    Returns None when the word timings do not line up with the wrapped text,
+    in which case the caller should fall back to a plain line rather than
+    render something out of sync.
+    """
+    flat = [token for line in lines_of_words for token in line]
+    if not words or len(flat) != len(words):
+        return None
+
+    pieces: list[str] = []
+    lead = int(round((words[0].start - cue.start) * 100))
+    if lead > 0:
+        pieces.append(f"{{\\k{lead}}}")
+
+    index = 0
+    for line_number, line in enumerate(lines_of_words):
+        if line_number:
+            pieces.append("\\N")
+        for position, token in enumerate(line):
+            word = words[index]
+            # A word holds its highlight until the next one starts, so the gap
+            # between words belongs to the word before it. Without this the
+            # highlight would blink off during every pause.
+            following = words[index + 1].start if index + 1 < len(words) else cue.end
+            duration = max(1, int(round((following - word.start) * 100)))
+            spacer = " " if position else ""
+            pieces.append(f"{{\\k{duration}}}{spacer}{_escape_ass(token)}")
+            index += 1
+
+    return "".join(pieces)
+
+
+def normalise_burn(value, source_language: str) -> list[str]:
+    """Accept the old "fa"/"both"/"none" spellings as well as a list of codes."""
+    if value is None:
+        return [source_language]
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("", BURN_NONE):
+            return []
+        if lowered == "both":
+            return [source_language, "en"]
+        return [lowered]
+    return [str(item).strip().lower() for item in value if str(item).strip()]
+
+
+def build_ass(
+    cues: list[SubtitleCue],
+    config: dict,
+    width: int,
+    height: int,
+    burn: list[str],
+    overlays: list[TextOverlay] | None = None,
+) -> str:
+    """Render the cues, and any non-speech overlays, as an ASS document.
+
+    `burn` is ordered: the first language is the primary one and sits above,
+    larger; a second sits under it, smaller. Further languages are ignored,
+    because a third line of text leaves no picture to read it over.
+    """
+    burn = [language for language in burn][:2]
+    overlays = overlays or []
+
+    reference = _reference_height(width, height)
+    primary_size = max(12, int(reference * float(config.get("font_size_pct", 5.2)) / 100))
+    secondary_size = max(10, int(reference * float(config.get("secondary_font_size_pct", 3.2)) / 100))
+    base_margin = max(10, int(height * float(config.get("margin_bottom_pct", 7.0)) / 100))
 
     side_margin = max(20, int(width * 0.06))
     usable_width = max(80, width - 2 * side_margin)
@@ -170,20 +343,41 @@ def build_ass(
     max_chars = int(config.get("max_chars_per_line", 42))
     max_lines = int(config.get("max_lines", 2))
 
-    # Never wrap wider than the picture, whatever the configured line length
-    # says: a line that runs off both edges is unreadable in a way that an
-    # extra line is not.
-    persian_fit = _chars_that_fit(usable_width, persian_size, ARABIC_CHAR_RATIO)
-    english_fit = _chars_that_fit(usable_width, english_size, LATIN_CHAR_RATIO)
-    persian_budget = min(max_chars, persian_fit)
-    english_budget = min(int(max_chars * 1.15), english_fit)
+    animation = str(config.get("animation", ANIMATION_FADE)).lower()
+    if animation not in ANIMATIONS:
+        logger.warning("Unknown subtitle animation %r; falling back to fade", animation)
+        animation = ANIMATION_FADE
+    animation_ms = max(0, int(config.get("animation_ms", 180)))
+    if animation_ms == 0:
+        animation = ANIMATION_NONE
 
-    english_line_height = int(english_size * LINE_HEIGHT_RATIO)
-    # The style value is the one-line case; each cue overrides it with the room
-    # its own English block actually needs.
-    persian_margin = base_margin
-    if show_english and show_persian:
-        persian_margin = base_margin + english_line_height
+    sizes = {language: (primary_size if index == 0 else secondary_size)
+             for index, language in enumerate(burn)}
+    secondary_line_height = int(secondary_size * LINE_HEIGHT_RATIO)
+
+    styles = []
+    for index, language in enumerate(burn):
+        margin = base_margin + (secondary_line_height if index == 0 and len(burn) > 1 else 0)
+        styles.append(
+            _style_line(
+                style_name(language), _font_for(config, language), sizes[language],
+                config, margin, side_margin,
+            )
+        )
+    for language in {overlay.language for overlay in overlays}:
+        if language in burn:
+            continue
+        styles.append(
+            _style_line(
+                style_name(language), _font_for(config, language), primary_size,
+                config, base_margin, side_margin,
+            )
+        )
+    if not styles:
+        styles.append(
+            _style_line("LDEFAULT", _font_for(config, "en"), primary_size,
+                        config, base_margin, side_margin)
+        )
 
     lines = [
         "[Script Info]",
@@ -201,42 +395,75 @@ def build_ass(
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding",
-        _style_line(
-            STYLE_PERSIAN, config.get("font", "Tahoma"), persian_size,
-            config, persian_margin, side_margin,
-        ),
-        _style_line(
-            STYLE_ENGLISH, config.get("english_font", "Arial"), english_size,
-            config, base_margin, side_margin,
-        ),
+        *styles,
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
+
+    centre_x = width // 2
 
     for cue in cues:
         if cue.end <= cue.start:
             continue
         start, end = _ass_time(cue.start), _ass_time(cue.end)
 
-        english_lines: list[str] = []
-        if show_english and cue.english.strip():
-            english_lines = wrap(cue.english, english_budget, max_lines, english_fit)
+        # Wrap the lower language first: how tall it turns out decides how far
+        # the upper one has to be lifted.
+        wrapped: dict[str, list[list[str]]] = {}
+        for index, language in enumerate(burn):
+            text = cue.text_for(language).strip()
+            if not text:
+                continue
+            size = sizes[language]
+            fit = _chars_that_fit(usable_width, size, char_ratio(language))
+            budget = min(max_chars if index == 0 else int(max_chars * 1.15), fit)
+            wrapped[language] = wrap_tokens(text.split(), budget, max_lines, fit)
 
-        if show_persian and cue.persian.strip():
-            body = "\\N".join(
-                _escape_ass(line)
-                for line in wrap(cue.persian, persian_budget, max_lines, persian_fit)
+        lower_lines = len(wrapped.get(burn[1], [])) if len(burn) > 1 else 0
+
+        for index, language in enumerate(burn):
+            token_lines = wrapped.get(language)
+            if not token_lines:
+                continue
+            size = sizes[language]
+            margin = base_margin + (lower_lines * secondary_line_height if index == 0 else 0)
+            baseline_y = height - margin
+            rise = max(4, int(size * RISE_DISTANCE_RATIO))
+
+            body = None
+            # Karaoke only makes sense for the language actually being spoken;
+            # a translation has no per-word timing to follow.
+            if animation == ANIMATION_KARAOKE and language == cue.source:
+                body = _karaoke_body(cue, token_lines, cue.words)
+
+            prefix = _animation_prefix(animation, animation_ms, centre_x, baseline_y, rise)
+            if body is None:
+                body = "\\N".join(
+                    " ".join(_escape_ass(token) for token in line) for line in token_lines
+                )
+            if not body:
+                continue
+
+            lines.append(
+                f"Dialogue: 0,{start},{end},{style_name(language)},,0,0,{margin},,{prefix}{body}"
             )
-            if body:
-                # A three-line English block needs the Persian lifted three
-                # lines, not the one the style assumes.
-                margin = base_margin + len(english_lines) * english_line_height
-                lines.append(f"Dialogue: 0,{start},{end},{STYLE_PERSIAN},,0,0,{margin},,{body}")
 
-        if english_lines:
-            body = "\\N".join(_escape_ass(line) for line in english_lines)
-            lines.append(f"Dialogue: 0,{start},{end},{STYLE_ENGLISH},,0,0,0,,{body}")
+    for overlay in overlays:
+        if overlay.end <= overlay.start or not overlay.text.strip():
+            continue
+        size = max(12, int(reference * overlay.size_pct / 100))
+        fit = _chars_that_fit(usable_width, size, char_ratio(overlay.language))
+        token_lines = wrap_tokens(overlay.text.split(), min(max_chars, fit), 3, fit)
+        body = "\\N".join(" ".join(_escape_ass(t) for t in line) for line in token_lines)
+        margin = max(10, int(height * overlay.margin_pct / 100))
+        # Overlays carry their size and alignment inline so they can differ
+        # from the subtitle style without needing a style of their own.
+        tags = f"\\an{overlay.alignment}\\fs{size}" + _fade_tag(max(160, animation_ms))
+        lines.append(
+            f"Dialogue: 1,{_ass_time(overlay.start)},{_ass_time(overlay.end)},"
+            f"{style_name(overlay.language)},,0,0,{margin},,{{{tags}}}{body}"
+        )
 
     return "\n".join(lines) + "\n"
 
@@ -257,9 +484,17 @@ def build_srt(cues: list[SubtitleCue], language: str) -> str:
 
 
 def write_ass(
-    cues: list[SubtitleCue], path: Path, config: dict, width: int, height: int, mode: str
+    cues: list[SubtitleCue],
+    path: Path,
+    config: dict,
+    width: int,
+    height: int,
+    burn: list[str],
+    overlays: list[TextOverlay] | None = None,
 ) -> Path:
-    path.write_text(build_ass(cues, config, width, height, mode), encoding="utf-8")
+    path.write_text(
+        build_ass(cues, config, width, height, burn, overlays), encoding="utf-8"
+    )
     return path
 
 
@@ -267,7 +502,7 @@ def write_srt(cues: list[SubtitleCue], path: Path, language: str) -> Path | None
     content = build_srt(cues, language)
     if not content.strip():
         return None
-    # A BOM is what makes players and editors read the Persian as UTF-8 rather
+    # A BOM is what makes players and editors read the text as UTF-8 rather
     # than guessing at a legacy code page.
     path.write_text(content, encoding="utf-8-sig")
     return path
@@ -288,8 +523,12 @@ def slice_cues(cues: list[SubtitleCue], start: float, end: float) -> list[Subtit
             SubtitleCue(
                 start=max(0.0, cue.start - start),
                 end=min(end, cue.end) - start,
-                persian=cue.persian,
-                english=cue.english,
+                source=cue.source,
+                texts=dict(cue.texts),
+                words=[
+                    TimedWord(word.start - start, word.end - start, word.text)
+                    for word in cue.words
+                ],
             )
         )
     return window
@@ -297,4 +536,6 @@ def slice_cues(cues: list[SubtitleCue], start: float, end: float) -> list[Subtit
 
 def transcript_text(cues: list[SubtitleCue], language: str) -> str:
     """Join the cues back into flowing text, for the .txt transcript."""
-    return " ".join(cue.text_for(language).strip() for cue in cues if cue.text_for(language).strip())
+    return " ".join(
+        cue.text_for(language).strip() for cue in cues if cue.text_for(language).strip()
+    )

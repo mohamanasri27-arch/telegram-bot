@@ -48,11 +48,11 @@ def _starts_cleanly(cues: list[SubtitleCue], index: int) -> bool:
     previous = cues[index - 1]
     if cues[index].start - previous.end >= FRESH_START_GAP:
         return True
-    return previous.persian.rstrip().endswith((".", "؟", "!", "…", "؛"))
+    return previous.source_text.rstrip().endswith((".", "؟", "!", "…", "؛"))
 
 
 def _ends_cleanly(cue: SubtitleCue) -> bool:
-    return cue.persian.rstrip().endswith((".", "؟", "!", "…"))
+    return cue.source_text.rstrip().endswith((".", "؟", "!", "…"))
 
 
 def pick_highlights(
@@ -78,7 +78,7 @@ def pick_highlights(
         for forward in range(index, len(cues)):
             if cues[forward].end - start > maximum:
                 break
-            words += _word_count(cues[forward].persian or cues[forward].english)
+            words += _word_count(cues[forward].source_text)
             end = cues[forward].end
             last_index = forward
             # Once the window is long enough, stop at the first clean ending
@@ -102,7 +102,7 @@ def pick_highlights(
         score -= abs(length - (minimum + maximum) / 2) / (maximum * 4)
 
         candidates.append(
-            Highlight(start=start, end=end, score=score, opening_line=cue.persian or cue.english)
+            Highlight(start=start, end=end, score=score, opening_line=cue.source_text)
         )
 
     chosen: list[Highlight] = []
@@ -149,6 +149,8 @@ def render_clip(
     output_config: dict,
     subtitle_config: dict,
     workdir: Path,
+    source_language: str = "fa",
+    punch_in: float = 0.0,
 ) -> None:
     """Cut one vertical clip, with its own re-timed subtitles burned in."""
     width = ffmpeg_tools.even(int(config.get("width", 1080)))
@@ -165,15 +167,22 @@ def render_clip(
 
     video_chain = [reframe]
 
-    burn_mode = subtitle_config.get("burn", subtitles.BURN_PERSIAN)
-    if config.get("burn_subtitles", True) and burn_mode != subtitles.BURN_NONE:
+    # The zoom goes on before the subtitles, so the picture drifts in and the
+    # text stays nailed to the bottom of the frame where it belongs.
+    if punch_in > 0:
+        video_chain.append(
+            ffmpeg_tools.punch_in_filter(punch_in, length, source_info.fps, width, height)
+        )
+
+    burn = subtitles.normalise_burn(subtitle_config.get("burn"), source_language)
+    if config.get("burn_subtitles", True) and burn:
         window = subtitles.slice_cues(cues, highlight.start, highlight.end)
         if window:
             # A bare relative name keeps the filter free of the ':' and '\'
             # that a Windows path would otherwise smuggle into the syntax.
             ass_name = f"{destination.stem}.ass"
             subtitles.write_ass(
-                window, workdir / ass_name, subtitle_config, width, height, burn_mode
+                window, workdir / ass_name, subtitle_config, width, height, burn
             )
             video_chain.append(f"ass={ass_name}")
 

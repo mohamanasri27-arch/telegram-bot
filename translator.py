@@ -121,8 +121,10 @@ class Translator:
 
         return self._restore(translated, replacements).strip()
 
-    async def translate_many(self, texts: list[str], batch_size: int = 20) -> list[str]:
-        """Translate a list of short strings, keeping them one-to-one.
+    async def translate_many(
+        self, texts: list[str], target: str = "en", batch_size: int = 20
+    ) -> list[str]:
+        """Translate a list of short strings into `target`, keeping them one-to-one.
 
         Subtitle cues are translated individually rather than as one block:
         a block comes back as better English, but with no way to tell which
@@ -142,13 +144,14 @@ class Translator:
             for attempt in range(1, MAX_RETRIES + 1):
                 try:
                     translated = await asyncio.to_thread(
-                        GoogleTranslator(source="auto", target="en").translate_batch,
+                        GoogleTranslator(source="auto", target=target).translate_batch,
                         [item[0] for item in shielded],
                     )
                     break
                 except Exception:
                     logger.warning(
-                        "Batch translation failed (attempt %d/%d)", attempt, MAX_RETRIES
+                        "Batch translation into %s failed (attempt %d/%d)",
+                        target, attempt, MAX_RETRIES,
                     )
                     if attempt == MAX_RETRIES:
                         break

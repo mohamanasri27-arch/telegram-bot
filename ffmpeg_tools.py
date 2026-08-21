@@ -436,15 +436,69 @@ def encode(
     _run(args, cwd=workdir)
 
 
-def extract_audio(source: Path, destination: Path) -> None:
+def speech_filter(config: dict) -> str:
+    """The filter chain that cleans speech up before Whisper hears it.
+
+    This never touches the audio anyone will listen to — only the throwaway wav
+    fed to the recogniser — so it can be more aggressive than a mix would
+    tolerate. Room rumble, handling noise and hiss are all things the decoder
+    has to work around, and removing them is the cheapest accuracy the pipeline
+    can buy.
+    """
+    parts = ["highpass=f=85"]
+    if config.get("denoise", True):
+        parts.append("afftdn=nr=12:nf=-28")
+    if config.get("even_out_levels", True):
+        # Whisper handles a steady voice better than one that drifts between
+        # loud and almost inaudible within the same sentence.
+        parts.append("dynaudnorm=f=250:g=7:p=0.9")
+    return ",".join(parts)
+
+
+def extract_audio(source: Path, destination: Path, audio_filter: str | None = None) -> None:
     """Pull a 16 kHz mono wav out of a video, which is what Whisper wants."""
-    _run([
+    args = [
         _binary("ffmpeg"), "-hide_banner", "-nostdin", "-y",
         "-i", str(source),
         "-vn", "-ac", "1", "-ar", "16000",
-        "-c:a", "pcm_s16le",
-        str(destination),
-    ])
+    ]
+    if audio_filter:
+        args += ["-af", audio_filter]
+    args += ["-c:a", "pcm_s16le", str(destination)]
+    _run(args)
+
+
+def punch_in_filter(
+    amount: float, seconds: float, fps: float, width: int, height: int
+) -> str:
+    """A slow zoom towards the centre, to keep a locked-off shot alive.
+
+    Deliberately tiny: a few percent across the whole clip is felt rather than
+    seen, which is the difference between production value and a gimmick.
+    """
+    frames = max(1, int(seconds * fps))
+    step = max(1e-6, amount / frames)
+    return (
+        f"zoompan=z='min(1+{step:.8f}*on,{1 + amount:.4f})'"
+        f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f":d=1:s={even(width)}x{even(height)}:fps={fps:.4f}"
+    )
+
+
+def colour_input(colour: str, width: int, height: int, fps: float, seconds: float) -> list[str]:
+    """Input arguments for a generated solid-colour segment."""
+    return [
+        "-f", "lavfi", "-t", f"{max(0.1, seconds):.3f}",
+        "-i", f"color=c={colour}:s={even(width)}x{even(height)}:r={fps:.4f}",
+    ]
+
+
+def silence_input(seconds: float) -> list[str]:
+    """Input arguments for a silent stereo track of a given length."""
+    return [
+        "-f", "lavfi", "-t", f"{max(0.1, seconds):.3f}",
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+    ]
 
 
 def thumbnail(source: Path, destination: Path, at_second: float) -> None:
