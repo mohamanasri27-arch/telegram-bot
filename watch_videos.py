@@ -1,7 +1,8 @@
-"""Watch a folder for videos and edit whatever lands in it.
+"""Instagram Reels Editor - watch a folder and edit whatever lands in it.
 
-Drop a file into videos-in/, and the edited video, the subtitles and the short
-clips appear in videos-out/. Nothing to click, nothing to configure per video.
+Drop a file into videos-in/, and the edited video, the subtitles and the
+vertical Reels clips appear in videos-out/. Nothing to click, nothing to
+configure per video.
 
 Run it with filenames instead to edit those files once and exit:
 
@@ -25,7 +26,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-logger = logging.getLogger("video-editor")
+logger = logging.getLogger("reels-editor")
 
 POLL_SECONDS = 3.0
 
@@ -133,9 +134,10 @@ async def watch(config: dict) -> None:
         await transcriber.load()
 
     logger.info("=" * 60)
-    logger.info("  READY. Put videos in:  %s", inbox)
-    logger.info("  Edited videos appear in: %s", outbox)
-    logger.info("  Settings: %s", video_config.CONFIG_FILE.name)
+    logger.info("  INSTAGRAM REELS EDITOR - ready")
+    logger.info("  Put videos in:           %s", inbox)
+    logger.info("  Edited videos and clips: %s", outbox)
+    logger.info("  Settings:                %s", video_config.CONFIG_FILE.name)
     logger.info("  Press Ctrl+C to stop.")
     logger.info("=" * 60)
 
@@ -180,7 +182,7 @@ async def edit_files(paths: list[Path], config: dict) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Edit videos automatically: clean up, subtitle, brand and clip."
+        description="Instagram Reels Editor: clean up, subtitle, brand and cut to Reels."
     )
     parser.add_argument(
         "videos", nargs="*", type=Path,

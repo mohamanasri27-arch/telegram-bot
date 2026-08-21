@@ -1,5 +1,7 @@
 """The edit itself: what happens to a video, in what order, and why.
 
+This is the engine behind the Instagram Reels Editor.
+
 The work is deliberately split into two encodes rather than one per feature.
 
   1. The body pass cuts the silence out and fixes colour and loudness in the
