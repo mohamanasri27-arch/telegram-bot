@@ -102,7 +102,19 @@ def _build_body(source: Path, destination: Path, config: dict, info: ffmpeg_tool
     ranges = [(0.0, info.duration)]
     note = "kept full length"
 
-    if cleanup.get("remove_silence", True) and info.has_audio and info.duration > 0:
+    # A voiceover was recorded against the picture as it stands. Cutting the
+    # picture now would slide it out of step with the recording, so the two
+    # features cannot both apply.
+    has_voiceover = bool(video_config.asset_path(str(config["voiceover"].get("file", ""))))
+    if has_voiceover and cleanup.get("remove_silence", True):
+        note = "kept full length (silence cutting is off while a voiceover is used)"
+
+    if (
+        cleanup.get("remove_silence", True)
+        and not has_voiceover
+        and info.has_audio
+        and info.duration > 0
+    ):
         silences = ffmpeg_tools.detect_silences(
             source,
             float(cleanup.get("silence_threshold_db", -34.0)),
@@ -153,6 +165,14 @@ async def _transcribe(
     accuracy = config["accuracy"]
     language = str(config.get("language", "fa"))
 
+    # Subtitles have to follow whatever the viewer will hear. When a voiceover
+    # replaces the sound, the video's own audio is no longer the subject.
+    voice_config = config["voiceover"]
+    voice = video_config.asset_path(str(voice_config.get("file", "")))
+    read_voice = bool(voice) and bool(voice_config.get("transcribe", True))
+    source = voice if read_voice else body
+    offset = float(voice_config.get("start_at", 0.0)) if read_voice else 0.0
+
     speech = workdir / "speech.wav"
     # The recogniser gets its own cleaned-up copy of the audio. Nobody listens
     # to this file, so scrubbing it costs nothing and buys real accuracy.
@@ -161,7 +181,7 @@ async def _transcribe(
         if accuracy.get("clean_audio_first", True)
         else None
     )
-    ffmpeg_tools.extract_audio(body, speech, audio_filter)
+    ffmpeg_tools.extract_audio(source, speech, audio_filter)
 
     decoded = await transcriber.transcribe_cues(
         str(speech),
@@ -173,13 +193,18 @@ async def _transcribe(
         use_context=bool(accuracy.get("use_context", False)),
     )
 
+    # A recording that starts partway through the video has to have that
+    # offset added, or every subtitle lands early by exactly that much.
     cues = [
         SubtitleCue(
-            start=item.start,
-            end=item.end,
+            start=item.start + offset,
+            end=item.end + offset,
             source=language,
             texts={language: item.text},
-            words=[TimedWord(word.start, word.end, word.text) for word in item.words],
+            words=[
+                TimedWord(word.start + offset, word.end + offset, word.text)
+                for word in item.words
+            ],
         )
         for item in decoded
     ]
@@ -279,6 +304,58 @@ def _normalise_segment(
 
 
 HOOK_ALIGNMENTS = {"top": 8, "middle": 5, "bottom": 2}
+
+
+def _apply_voiceover(
+    builder: "_GraphBuilder", config: dict, speech_label: str
+) -> tuple[str, str | None]:
+    """Lay a recorded voice over the body's own sound.
+
+    Replacing and mixing are the same graph with a different volume on the
+    original — zero for one, audible for the other — which keeps this to a
+    single path instead of two that drift apart.
+    """
+    voice_config = config["voiceover"]
+    voice = video_config.asset_path(str(voice_config.get("file", "")))
+    if not voice:
+        return speech_label, None
+
+    replacing = str(voice_config.get("mode", "replace")).lower() == "replace"
+    original_volume = (
+        0.0 if replacing else max(0.0, float(voice_config.get("original_volume", 0.12)))
+    )
+    volume = max(0.0, float(voice_config.get("volume", 1.0)))
+    delay_ms = int(max(0.0, float(voice_config.get("start_at", 0.0))) * 1000)
+
+    index = builder.add_input(["-i", str(voice)])
+    builder.add(f"{speech_label}volume={original_volume:.3f}[original]")
+
+    chain = _AUDIO_FORMAT
+    if delay_ms:
+        chain += f",adelay={delay_ms}:all=1"
+    chain += f",volume={volume:.3f}"
+    builder.add(f"[{index}:a]{chain}[voice]")
+
+    duck = bool(voice_config.get("duck_original", True)) and original_volume > 0
+    if duck:
+        builder.add("[voice]asplit=2[voiceout][voicekey]")
+        builder.add(
+            "[original][voicekey]sidechaincompress="
+            "threshold=0.03:ratio=12:attack=15:release=350[originalduck]"
+        )
+        first, second = "[originalduck]", "[voiceout]"
+    else:
+        first, second = "[original]", "[voice]"
+
+    # The original goes in first so duration=first follows the picture. A
+    # recording longer than the video is cut; a shorter one leaves silence.
+    builder.add(f"{first}{second}amix=inputs=2:duration=first:normalize=0[withvoice]")
+
+    if replacing:
+        return "[withvoice]", "replaced the sound with your recording"
+    return "[withvoice]", "mixed your recording over the original" + (
+        " with ducking" if duck else ""
+    )
 
 
 def _hook_overlays(promo: dict, language: str) -> list[subtitles.TextOverlay]:
@@ -409,16 +486,20 @@ def _finish(
     builder.add(f"[0:a]{_AUDIO_FORMAT}[speech]")
     body_audio = "[speech]"
 
+    body_audio, voice_note = _apply_voiceover(builder, config, body_audio)
+    if voice_note:
+        notes.append(voice_note)
+
     music = video_config.asset_path(str(branding.get("music", "")))
     if music:
         duck = bool(branding.get("duck_music", True))
         if duck:
             # The speech is needed twice: once to be heard, once to tell the
             # compressor when to pull the music down.
-            builder.add("[speech]asplit=2[speechout][speechkey]")
+            builder.add(f"{body_audio}asplit=2[speechout][speechkey]")
             speech_label, key_label = "[speechout]", "[speechkey]"
         else:
-            speech_label, key_label = "[speech]", None
+            speech_label, key_label = body_audio, None
 
         index = builder.add_input(["-stream_loop", "-1", "-i", str(music)])
         volume = max(0.0, float(branding.get("music_volume", 0.12)))

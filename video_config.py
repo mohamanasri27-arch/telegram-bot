@@ -150,6 +150,25 @@ DEFAULTS = {
         "min_source_seconds": 60.0,
     },
 
+    # Lay your own recorded voice over the video.
+    "voiceover": {
+        # The recording. Relative to assets/ unless it is a full path.
+        "file": "",
+        # "replace" throws the original sound away and uses only your voice.
+        # "mix" keeps the original underneath, at original_volume.
+        "mode": "replace",
+        "volume": 1.0,
+        "original_volume": 0.12,
+        # Pull the original down whenever your voice is speaking.
+        "duck_original": True,
+        # Seconds into the video where the recording should start.
+        "start_at": 0.0,
+        # Take the subtitles from your recording rather than the video's own
+        # audio. This is almost always what you want: the recording is what
+        # the viewer will actually hear.
+        "transcribe": True,
+    },
+
     "branding": {
         # All optional: leave the filename empty to skip that piece.
         # Paths are relative to the assets/ folder unless absolute.
