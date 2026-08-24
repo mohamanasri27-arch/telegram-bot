@@ -15,6 +15,7 @@ would produce subtitles that drift further out of sync with every cut, and
 subtitling before the intro is joined on is what keeps the cues from having to
 be shifted afterwards.
 """
+import copy
 import logging
 import shutil
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from pathlib import Path
 
 import clipper
 import ffmpeg_tools
+import montage
 import subtitles
 import video_config
 from subtitles import SubtitleCue, TimedWord
@@ -415,8 +417,9 @@ def _end_card_segment(
         ],
     )
 
+    card_filter = ffmpeg_tools.subtitle_filter(ass_name, workdir, video_config.FONTS_DIR)
     builder.add(
-        f"[{video_index}:v]ass={ass_name},setsar=1,fps={fps:.4f},format=yuv420p[cardv]"
+        f"[{video_index}:v]{card_filter},setsar=1,fps={fps:.4f},format=yuv420p[cardv]"
     )
     builder.add(f"[{audio_index}:a]{_AUDIO_FORMAT}[carda]")
     return "[cardv]", "[carda]", seconds
@@ -458,7 +461,9 @@ def _finish(
         )
         # Relative name plus cwd=workdir: a Windows absolute path inside a
         # filter would need its colon and backslashes escaped three times over.
-        video_chain.append(f"ass={ass_name}")
+        video_chain.append(
+            ffmpeg_tools.subtitle_filter(ass_name, workdir, video_config.FONTS_DIR)
+        )
         if burn_cues:
             notes.append(f"burned {len(burn_cues)} cues in {'+'.join(burn)}")
         if overlays:
@@ -695,3 +700,97 @@ async def edit(
 
     shutil.rmtree(workdir, ignore_errors=True)
     return result
+
+
+# --------------------------------------------------------------------------
+# Montage: several shots cut to music
+# --------------------------------------------------------------------------
+
+async def build_montage(
+    clip_paths: list[Path],
+    music: Path | None,
+    output_dir: Path,
+    config: dict,
+    transcriber=None,
+    translator=None,
+    name: str = "montage",
+) -> EditResult:
+    """Cut several short clips to music, then finish them like any other edit.
+
+    The two halves are kept apart on purpose. This function decides what the
+    picture is — which shot, from where, for how long — and then hands the
+    result to the ordinary edit for anything that is not about cutting: a
+    voiceover, subtitles, a logo, a hook, an end card. Nothing about those
+    features has to know that a montage is what it is looking at.
+    """
+    ffmpeg_tools.ensure_available()
+
+    clips = montage.gather_clips(clip_paths)
+    if not clips:
+        raise ffmpeg_tools.FFmpegError("no video files found to build a montage from")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    workdir = output_dir / ".work"
+    workdir.mkdir(exist_ok=True)
+
+    result = EditResult(source=clips[0], output_dir=output_dir)
+    settings = config["montage"]
+
+    # The music decides the length. Without it, the clips do.
+    if music:
+        total = ffmpeg_tools.probe(music).duration
+    else:
+        total = sum(ffmpeg_tools.probe(clip).duration for clip in clips)
+    if total <= 0:
+        raise ffmpeg_tools.FFmpegError("could not work out how long the montage should be")
+
+    onsets = montage.detect_onsets(music, workdir) if (music and settings.get("beat_sync", True)) else []
+    shots = montage.plan_shots(clips, settings, onsets, total)
+    if not shots:
+        raise ffmpeg_tools.FFmpegError("the clips were too short to fill a montage")
+
+    logger.info("Cutting %d shots from %d clips over %.0fs", len(shots), len(clips), total)
+    cut = workdir / "montage.mp4"
+    montage.render(
+        shots, cut, settings, config["output"], workdir,
+        music=music, music_volume=float(settings.get("music_volume", 0.9)),
+    )
+    result.notes.append(
+        f"cut {len(shots)} shots from {len(clips)} clips"
+        + (f", to {len(onsets)} beats" if onsets else f", every {settings.get('shot_seconds', 2.0)}s")
+    )
+    (output_dir / f"{name}-shots.txt").write_text(
+        montage.index_text(shots), encoding="utf-8-sig"
+    )
+
+    # Anything beyond the cutting is the ordinary edit's job.
+    wants_finish = bool(
+        video_config.asset_path(str(config["voiceover"].get("file", "")))
+        or str(config["promo"].get("hook_text") or "").strip()
+        or str(config["promo"].get("end_card_text") or "").strip()
+        or video_config.asset_path(str(config["branding"].get("logo", "")))
+    )
+    if not wants_finish:
+        final = output_dir / f"{name}.mp4"
+        shutil.move(str(cut), str(final))
+        result.edited = final
+        shutil.rmtree(workdir, ignore_errors=True)
+        return result
+
+    finish_config = copy.deepcopy(config)
+    # The montage is already cut to the music; re-cutting it on silence would
+    # tear the shots off the beat.
+    finish_config["cleanup"]["remove_silence"] = False
+    finish_config["cleanup"]["normalize_audio"] = False
+    finish_config["clips"]["enabled"] = False
+    finish_config["output"]["format"] = "source"
+    # The music is already inside the montage's own audio track.
+    finish_config["branding"]["music"] = ""
+    # Subtitles only mean something here if there is a voice to transcribe.
+    if not config["voiceover"].get("file"):
+        finish_config["subtitles"]["enabled"] = False
+
+    finished = await edit(cut, output_dir, finish_config, transcriber, translator)
+    finished.notes = result.notes + finished.notes
+    shutil.rmtree(workdir, ignore_errors=True)
+    return finished

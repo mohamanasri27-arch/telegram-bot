@@ -15,6 +15,7 @@ from pathlib import Path
 
 import ffmpeg_tools
 import subtitles
+import video_config
 from subtitles import SubtitleCue
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,9 @@ def render_clip(
             subtitles.write_ass(
                 window, workdir / ass_name, subtitle_config, width, height, burn
             )
-            video_chain.append(f"ass={ass_name}")
+            video_chain.append(
+                ffmpeg_tools.subtitle_filter(ass_name, workdir, video_config.FONTS_DIR)
+            )
 
     fade_out_start = max(0.0, length - CLIP_FADE_SECONDS)
     video_chain.append(f"fade=t=in:st=0:d={CLIP_FADE_SECONDS}")
@@ -200,10 +203,12 @@ def render_clip(
         audio_label = "[a]"
 
     ffmpeg_tools.encode(
+        # Both before -i: after it they are output options, which happens to
+        # work with a single input and quietly stops working with more.
         inputs=[[
             "-ss", f"{highlight.start:.3f}",
-            "-i", str(source),
             "-t", f"{length:.3f}",
+            "-i", str(source),
         ]],
         graph=graph,
         video_label="[v]",

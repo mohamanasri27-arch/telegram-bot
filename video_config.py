@@ -17,6 +17,9 @@ PROJECT_DIR = Path(__file__).parent
 INBOX_DIR = PROJECT_DIR / "videos-in"
 OUTBOX_DIR = PROJECT_DIR / "videos-out"
 ASSETS_DIR = PROJECT_DIR / "assets"
+# Font files bundled with the project, so Persian renders well without
+# anyone having to install a font system-wide.
+FONTS_DIR = PROJECT_DIR / "fonts"
 
 DEFAULTS = {
     # The language actually spoken in the video.
@@ -73,10 +76,12 @@ DEFAULTS = {
         # Languages to translate into, for the .srt files (and available to
         # burn). The spoken language is always included for free.
         "translate_to": ["en", "de"],
-        # Fonts per language. Must be installed on this computer. Tahoma ships
-        # with Windows and covers Persian; Vazirmatn looks better if installed.
+        # Fonts per language. Vazirmatn ships in the project's fonts/ folder
+        # and is handed to the renderer directly, so nothing has to be
+        # installed system-wide. Any font installed on this computer also
+        # works by name; Tahoma is the safe Windows fallback for Persian.
         "fonts": {
-            "fa": "Tahoma",
+            "fa": "Vazirmatn",
             "en": "Arial",
             "de": "Arial",
             "default": "Arial",
@@ -148,6 +153,30 @@ DEFAULTS = {
         # Only cut clips when the video is at least this long. Follows the clip
         # length above: a 60s source can still yield two 30s Reels.
         "min_source_seconds": 60.0,
+    },
+
+    # Several short shots cut to music — the product-teaser style. This is a
+    # different job from the rest: no speech to follow, paced by the track.
+    "montage": {
+        # Length of each shot when not following the beat.
+        "shot_seconds": 2.0,
+        # Cut where the music punches instead. Shot length is still kept
+        # inside the min/max below, since beat finding is not infallible.
+        "beat_sync": True,
+        "min_shot_seconds": 0.8,
+        "max_shot_seconds": 4.0,
+        # "sequence" uses the clips in filename order, "shuffle" mixes them.
+        "order": "sequence",
+        # none / cinematic / warm / cool
+        "grade": "cinematic",
+        "framing": "crop",
+        "width": 1080,
+        "height": 1920,
+        "fps": 30,
+        # "cut" is a hard cut; "fade" dips each shot in and out.
+        "transition": "cut",
+        "transition_seconds": 0.15,
+        "music_volume": 0.9,
     },
 
     # Lay your own recorded voice over the video.

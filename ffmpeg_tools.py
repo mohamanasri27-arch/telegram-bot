@@ -387,6 +387,27 @@ def vertical_filter(
     return f"crop={crop_width}:{source.height}:{left}:0,scale={width}:{height}:flags=lanczos"
 
 
+def subtitle_filter(ass_name: str, workdir: Path, fonts_dir: Path | None = None) -> str:
+    """The burn-in filter, with any bundled fonts made visible to libass.
+
+    Fonts are copied next to the subtitle script rather than referenced where
+    they live, for the same reason the script itself is passed by bare name: a
+    Windows absolute path inside a filter argument would need its colon and
+    backslashes escaped three times over.
+    """
+    if fonts_dir and fonts_dir.is_dir():
+        faces = [path for path in fonts_dir.iterdir() if path.suffix.lower() in (".ttf", ".otf")]
+        if faces:
+            staged = workdir / "fonts"
+            staged.mkdir(exist_ok=True)
+            for face in faces:
+                target = staged / face.name
+                if not target.exists():
+                    shutil.copy2(face, target)
+            return f"ass={ass_name}:fontsdir=fonts"
+    return f"ass={ass_name}"
+
+
 def logo_overlay_position(position: str, margin: int = 36) -> str:
     """Translate a corner name into overlay x:y coordinates."""
     positions = {

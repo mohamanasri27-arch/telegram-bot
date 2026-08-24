@@ -180,6 +180,33 @@ async def edit_files(paths: list[Path], config: dict) -> int:
     return failures
 
 
+async def build_montage(paths: list[Path], music: Path | None, config: dict) -> int:
+    outbox = video_config.OUTBOX_DIR
+    outbox.mkdir(exist_ok=True)
+
+    transcriber = Transcriber(config["whisper"].get("model") or None)
+    translator = Translator()
+
+    name = (paths[0].stem if paths[0].is_file() else paths[0].name) or "montage"
+    logger.info("=" * 60)
+    logger.info("Building a montage from %d input(s)", len(paths))
+    started = time.monotonic()
+    try:
+        result = await video_pipeline.build_montage(
+            paths, music, outbox / name, config, transcriber, translator, name=name
+        )
+    except ffmpeg_tools.FFmpegMissing:
+        raise
+    except Exception:
+        logger.exception("Could not build the montage")
+        return 1
+
+    logger.info("Done in %.0f seconds -> %s", time.monotonic() - started, outbox / name)
+    for note in result.notes:
+        logger.info("  - %s", note)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Instagram Reels Editor: clean up, subtitle, brand and cut to Reels."
@@ -187,6 +214,14 @@ def main() -> int:
     parser.add_argument(
         "videos", nargs="*", type=Path,
         help="Videos to edit once. With none given, watch the videos-in folder.",
+    )
+    parser.add_argument(
+        "--montage", action="store_true",
+        help="Cut the given clips (or folders of clips) into one video paced by music.",
+    )
+    parser.add_argument(
+        "--music", type=Path, default=None,
+        help="Music track for --montage. Its length sets the length of the montage.",
     )
     arguments = parser.parse_args()
 
@@ -202,6 +237,16 @@ def main() -> int:
         return 2
 
     try:
+        if arguments.montage:
+            if not arguments.videos:
+                parser.error("--montage needs at least one clip or folder")
+            music = arguments.music
+            if music and not music.exists():
+                resolved = video_config.asset_path(str(music))
+                if not resolved:
+                    parser.error(f"no such music file: {music}")
+                music = resolved
+            return asyncio.run(build_montage(arguments.videos, music, config))
         if arguments.videos:
             return 1 if asyncio.run(edit_files(arguments.videos, config)) else 0
         asyncio.run(watch(config))
