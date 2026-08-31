@@ -725,9 +725,26 @@ async def build_montage(
     """
     ffmpeg_tools.ensure_available()
 
-    clips = montage.gather_clips(clip_paths)
+    clips, unreadable = montage.gather_sources(clip_paths)
+    if unreadable:
+        names = ", ".join(path.name for path in unreadable[:4])
+        # Worth naming: an iPhone photo library is full of these, and "no
+        # files found" would send someone looking in the wrong place.
+        message = (
+            f"{len(unreadable)} photo(s) are in HEIC format, which ffmpeg cannot open "
+            f"({names}). On iPhone: Settings > Camera > Formats > Most Compatible, "
+            f"or re-save them as JPEG."
+        )
+        if not clips:
+            raise ffmpeg_tools.FFmpegError(message)
+        logger.warning(message)
+
     if not clips:
-        raise ffmpeg_tools.FFmpegError("no video files found to build a montage from")
+        raise ffmpeg_tools.FFmpegError(
+            "no videos or photos found to build a montage from"
+        )
+
+    photos = sum(1 for clip in clips if montage.is_image(clip))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     workdir = output_dir / ".work"
@@ -753,14 +770,17 @@ async def build_montage(
     if not shots:
         raise ffmpeg_tools.FFmpegError("the clips were too short to fill a montage")
 
-    logger.info("Cutting %d shots from %d clips over %.0fs", len(shots), len(clips), total)
+    logger.info(
+        "Cutting %d shots from %d source(s) over %.0fs (%d photo(s), %d video(s))",
+        len(shots), len(clips), total, photos, len(clips) - photos,
+    )
     cut = workdir / "montage.mp4"
     montage.render(
         shots, cut, settings, config["output"], workdir,
         music=music, music_volume=float(settings.get("music_volume", 0.9)),
     )
     result.notes.append(
-        f"cut {len(shots)} shots from {len(clips)} clips"
+        f"cut {len(shots)} shots from {photos} photo(s) and {len(clips) - photos} video(s)"
         + (f", to {len(onsets)} beats" if onsets else f", every {settings.get('shot_seconds', 2.0)}s")
     )
     (output_dir / f"{name}-shots.txt").write_text(

@@ -51,6 +51,18 @@ GRADES = {
 }
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm", ".mpg", ".mpeg", ".wmv"}
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+
+# iPhones save these by default and ffmpeg cannot open them, so it is worth
+# saying so plainly rather than letting the probe fail with nothing useful.
+UNREADABLE_IMAGE_SUFFIXES = {".heic", ".heif"}
+
+# How far a still photo drifts across its slot. Enough that it reads as a shot
+# rather than a slide; little enough that nobody notices it happening.
+STILL_ZOOM = 0.12
+# Stills are scaled past the frame before the zoom so that pushing in crops
+# real pixels instead of enlarging the ones already on screen.
+STILL_OVERSCAN = 1.35
 
 
 @dataclass
@@ -58,20 +70,38 @@ class Shot:
     source: Path
     start: float
     duration: float
+    is_image: bool = False
 
 
-def gather_clips(paths: list[Path]) -> list[Path]:
-    """Expand folders into the video files inside them, keeping a stable order."""
-    clips: list[Path] = []
+def gather_sources(paths: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Collect the videos and photos to build from, in a stable order.
+
+    Returns the usable files and, separately, any that cannot be opened, so
+    the caller can tell the difference between "no input" and "input in a
+    format ffmpeg will not read".
+    """
+    usable: list[Path] = []
+    unreadable: list[Path] = []
+
+    def consider(item: Path) -> None:
+        suffix = item.suffix.lower()
+        if suffix in VIDEO_SUFFIXES or suffix in IMAGE_SUFFIXES:
+            usable.append(item)
+        elif suffix in UNREADABLE_IMAGE_SUFFIXES:
+            unreadable.append(item)
+
     for path in paths:
         if path.is_dir():
-            clips.extend(
-                sorted(item for item in path.iterdir()
-                       if item.is_file() and item.suffix.lower() in VIDEO_SUFFIXES)
-            )
-        elif path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES:
-            clips.append(path)
-    return clips
+            for item in sorted(path.iterdir()):
+                if item.is_file():
+                    consider(item)
+        elif path.is_file():
+            consider(path)
+    return usable, unreadable
+
+
+def is_image(path: Path) -> bool:
+    return path.suffix.lower() in IMAGE_SUFFIXES
 
 
 # --------------------------------------------------------------------------
@@ -197,9 +227,14 @@ def plan_shots(clips: list[Path], config: dict, onsets: list[float], total: floa
     if str(config.get("order", "sequence")).lower() == "shuffle":
         random.shuffle(order)
 
-    durations = [ffmpeg_tools.probe(clip).duration for clip in clips]
-    # Where in each clip the next slot should start, so a clip used twice shows
-    # two different moments rather than the same opening frames again.
+    stills = [is_image(clip) for clip in clips]
+    # A photo has no length of its own, so it fills whatever slot it is given.
+    durations = [
+        0.0 if still else ffmpeg_tools.probe(clip).duration
+        for clip, still in zip(clips, stills)
+    ]
+    # Where in each video the next slot should start, so a clip used twice
+    # shows two different moments rather than the same opening frames again.
     cursors = [0.0] * len(clips)
 
     shots: list[Shot] = []
@@ -208,6 +243,11 @@ def plan_shots(clips: list[Path], config: dict, onsets: list[float], total: floa
         if length < 0.15:
             continue
         which = order[index % len(order)]
+
+        if stills[which]:
+            shots.append(Shot(clips[which], 0.0, round(length, 3), is_image=True))
+            continue
+
         available = durations[which]
         if available <= 0:
             continue
@@ -244,16 +284,28 @@ def render(
     labels: list[str] = []
 
     for index, shot in enumerate(shots):
-        # -ss and -t both belong BEFORE -i. After it they are output options,
-        # which with several inputs means no shot gets trimmed at all and the
-        # montage runs long.
-        inputs.append([
-            "-ss", f"{shot.start:.3f}", "-t", f"{shot.duration:.3f}", "-i", str(shot.source),
-        ])
-        info = ffmpeg_tools.probe(shot.source)
-        parts = [ffmpeg_tools.vertical_filter(
-            info, width, height, str(config.get("framing", "crop")), 0.0
-        )]
+        if shot.is_image:
+            # A still needs a frame rate and a length given to it, since it has
+            # neither. Without -framerate the image demuxer assumes 25 and the
+            # shot ends up the wrong length.
+            inputs.append([
+                "-loop", "1", "-framerate", f"{fps:.4f}",
+                "-t", f"{shot.duration:.3f}", "-i", str(shot.source),
+            ])
+            # Zooming alternately in and out stops a row of photos feeling
+            # like one repeated move.
+            parts = [_still_motion(index, shot.duration, fps, width, height)]
+        else:
+            # -ss and -t both belong BEFORE -i. After it they are output
+            # options, which with several inputs means no shot gets trimmed at
+            # all and the montage runs long.
+            inputs.append([
+                "-ss", f"{shot.start:.3f}", "-t", f"{shot.duration:.3f}", "-i", str(shot.source),
+            ])
+            info = ffmpeg_tools.probe(shot.source)
+            parts = [ffmpeg_tools.vertical_filter(
+                info, width, height, str(config.get("framing", "crop")), 0.0
+            )]
         if grade:
             parts.append(grade)
         parts += [f"fps={fps:.4f}", "setsar=1", "format=yuv420p"]
@@ -297,6 +349,28 @@ def render(
     )
 
 
+def _still_motion(index: int, seconds: float, fps: float, width: int, height: int) -> str:
+    """Scale a photo past the frame and drift across it for the shot's length.
+
+    A photograph held still for a second and a half reads as a slideshow. The
+    same photograph moving slowly reads as a shot, and it costs nothing.
+    """
+    frames = max(1, int(seconds * fps))
+    step = STILL_ZOOM / frames
+    top = 1.0 + STILL_ZOOM
+    over_w, over_h = ffmpeg_tools.even(width * STILL_OVERSCAN), ffmpeg_tools.even(height * STILL_OVERSCAN)
+    zoom = (
+        f"min(1+{step:.8f}*on,{top:.4f})" if index % 2 == 0
+        else f"max({top:.4f}-{step:.8f}*on,1.0)"
+    )
+    return (
+        f"scale={over_w}:{over_h}:force_original_aspect_ratio=increase,"
+        f"crop={over_w}:{over_h},"
+        f"zoompan=z='{zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f":d=1:s={ffmpeg_tools.even(width)}x{ffmpeg_tools.even(height)}:fps={fps:.4f}"
+    )
+
+
 def index_text(shots: list[Shot]) -> str:
     """A readable list of what ended up where, for checking the result."""
     lines = ["# montage shot list", ""]
@@ -304,7 +378,7 @@ def index_text(shots: list[Shot]) -> str:
     for number, shot in enumerate(shots, start=1):
         lines.append(
             f"{number:02d}  at {moment:6.2f}s  {shot.duration:4.2f}s  "
-            f"{shot.source.name} (from {shot.start:.2f}s)"
+            f"{shot.source.name}" + ("  [photo]" if shot.is_image else f" (from {shot.start:.2f}s)")
         )
         moment += shot.duration
     return "\n".join(lines) + "\n"
