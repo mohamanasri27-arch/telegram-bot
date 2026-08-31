@@ -165,6 +165,10 @@ DEFAULTS = {
         "beat_sync": True,
         "min_shot_seconds": 0.8,
         "max_shot_seconds": 4.0,
+        # Longest the finished montage may run. The music otherwise decides,
+        # and a three-minute track would give a three-minute Reel. 0 means
+        # "use the whole track".
+        "max_seconds": 30.0,
         # "sequence" uses the clips in filename order, "shuffle" mixes them.
         "order": "sequence",
         # none / cinematic / warm / cool

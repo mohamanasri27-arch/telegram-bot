@@ -741,6 +741,10 @@ async def build_montage(
         total = ffmpeg_tools.probe(music).duration
     else:
         total = sum(ffmpeg_tools.probe(clip).duration for clip in clips)
+    cap = float(settings.get("max_seconds", 0) or 0)
+    if cap > 0 and total > cap:
+        logger.info("Trimming the montage to %.0fs (the track runs %.0fs)", cap, total)
+        total = cap
     if total <= 0:
         raise ffmpeg_tools.FFmpegError("could not work out how long the montage should be")
 
