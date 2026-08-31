@@ -390,14 +390,24 @@ videos-out/film/
 python watch_videos.py --montage --music assets\track.mp3 clips\
 ```
 
-`clips\` پوشه‌ای است که پلان‌های کوتاهتان در آن است. طول آهنگ، طول تیزر را
-تعیین می‌کند.
+`clips\` پوشه‌ای است که پلان‌های کوتاه یا **عکس‌ها** در آن است.
+
+**از عکس هم می‌شود.** اگر فقط عکس دارید (مثلاً چند عکس از یک ماشین)، همان‌ها را
+در پوشه بگذارید. هر عکس آرام زوم می‌شود — یکی به داخل، بعدی به بیرون — تا مثل
+اسلایدشو نباشد و مثل پلان دیده شود. عکس و ویدیو را می‌شود با هم قاطی کرد.
+
+فرمت‌های عکس: `jpg`، `png`، `webp`، `bmp`، `tif`.
+**`HEIC` کار نمی‌کند** (فرمت پیش‌فرض آیفون). در آیفون:
+Settings → Camera → Formats → **Most Compatible**، یا عکس‌ها را JPEG ذخیره کنید.
+
+طول تیزر پیش‌فرض **۳۰ ثانیه** است (`montage.max_seconds`)، نه کل طول آهنگ.
 
 | کلید | پیش‌فرض | کارش |
 | --- | --- | --- |
 | `montage.beat_sync` | `true` | برش روی ضربان آهنگ |
 | `montage.shot_seconds` | `2.0` | طول هر پلان وقتی `beat_sync` خاموش است |
 | `montage.min_shot_seconds` / `max_shot_seconds` | `0.8` / `4.0` | کوتاه‌ترین و بلندترین پلان |
+| `montage.max_seconds` | `30` | طول کل تیزر. `0` یعنی به اندازه‌ی کل آهنگ |
 | `montage.order` | `"sequence"` | ترتیب فایل‌ها، یا `"shuffle"` |
 | `montage.grade` | `"cinematic"` | `none` / `cinematic` / `warm` / `cool` |
 | `montage.transition` | `"cut"` | برش خشک، یا `"fade"` |
