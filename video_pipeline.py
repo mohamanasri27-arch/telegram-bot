@@ -607,6 +607,15 @@ async def edit(
     """Run every enabled stage against one video and return what was produced."""
     ffmpeg_tools.ensure_available()
 
+    # Every ffmpeg call in the pipeline runs with its working directory set to
+    # the run's own .work folder, so that filter arguments can name files
+    # without a path. A relative path handed in from the command line means
+    # something different from inside that folder, and ffmpeg simply cannot
+    # find the file. Resolving here, once, is what lets everything downstream
+    # ignore the question.
+    source = Path(source).resolve()
+    output_dir = Path(output_dir).resolve()
+
     info = ffmpeg_tools.probe(source)
     if not info.has_video:
         raise ffmpeg_tools.FFmpegError(f"{source.name} has no video track")
@@ -724,6 +733,12 @@ async def build_montage(
     features has to know that a montage is what it is looking at.
     """
     ffmpeg_tools.ensure_available()
+
+    # Same reason as in edit(): the render runs from the montage's own .work
+    # folder, so relative inputs would be looked for in the wrong place.
+    clip_paths = [Path(path).resolve() for path in clip_paths]
+    music = Path(music).resolve() if music else None
+    output_dir = Path(output_dir).resolve()
 
     clips, unreadable = montage.gather_sources(clip_paths)
     if unreadable:
